@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planet Zoo 2 Reserve Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f3efe6; --card: #fffdf8; --ink: #22301f; --muted: #6a7363; --line: #e3dccb;
+    --accent: #3d6a47; --accent-soft: #e4eedf;
+    --warn: #8f5512; --warn-soft: #f8ecd8;
+    --bad: #a1382a; --bad-soft: #f7e2dc;
+    --good: #2f6a3c; --good-soft: #e1efdf;
+    --flour: #6b4f8a; --flour-soft: #ece6f3;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; line-height: 1.45; }
+  h1, h2, h3 { font-family: "Fraunces", Georgia, serif; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+
+  header.top { padding: 18px 10px 10px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 10px; }
+  header.top h1 { font-size: 28px; }
+  header.top p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+  .wrap { padding: 0 10px 32px; }
+
+  .tabs { display: flex; gap: 6px; padding: 0 10px; border-bottom: 1px solid var(--line); margin-bottom: 16px; overflow-x: auto; }
+  .tabs button { background: none; border: 0; border-bottom: 3px solid transparent; padding: 10px 12px; font-weight: 500; color: var(--muted); cursor: pointer; white-space: nowrap; }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .stack { display: grid; gap: 14px; }
+  .grid2 { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+  .section-title { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+  .section-title h2 { font-size: 20px; }
+  .section-title h3 { font-size: 17px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+
+  button.primary { font-weight: 700; background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+  button.primary:hover { filter: brightness(1.08); }
+  button.primary:disabled { opacity: .45; cursor: default; filter: none; }
+  button.ghost { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer; font-weight: 500; }
+  button.ghost:hover { border-color: var(--accent); }
+  button.ghost.danger:hover { border-color: var(--bad); color: var(--bad); }
+  button.link { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; font-size: 13px; }
+  button.icon { background: none; border: 0; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px; }
+  button.icon:hover { color: var(--bad); }
+  input[type=text], input[type=number], select, textarea {
+    padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: #fff;
+  }
+  input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input[type=number] { width: 64px; }
+  input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--accent); }
+
+  .chip { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+  .chip.good { background: var(--good-soft); color: var(--good); }
+  .chip.bad { background: var(--bad-soft); color: var(--bad); }
+  .chip.warn { background: var(--warn-soft); color: var(--warn); }
+  .chip.flour { background: var(--flour-soft); color: var(--flour); }
+  .chip.plain { background: #efeae0; color: var(--muted); }
+
+  /* zoos */
+  .zoo-list { display: grid; gap: 6px; }
+  .zoo-pick { display: flex; justify-content: space-between; align-items: center; width: 100%; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px; cursor: pointer; }
+  .zoo-pick[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .row-add { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row-add input[type=text], .row-add select { flex: 1; min-width: 140px; }
+  .animal-row { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+  .animal-row .counts { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 14px; }
+  .animal-row .counts label { display: inline-flex; gap: 5px; align-items: center; }
+  .animal-row .meta { grid-column: 1 / -1; font-size: 13px; color: var(--muted); }
+
+  /* reserve picker */
+  .reserve-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .reserve-pills button { background: #fff; border: 1px solid var(--line); border-radius: 999px; padding: 6px 13px; cursor: pointer; font-weight: 500; }
+  .reserve-pills button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  .progress { display: grid; gap: 8px; }
+  .bar { height: 10px; background: #ebe5d8; border-radius: 999px; overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+  .stats-row { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; }
+
+  .eco { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
+  .eco:first-child { border-top: 0; }
+  .eco .need { grid-column: 2 / -1; font-size: 13px; color: var(--muted); }
+
+  .ra { padding: 11px 0; border-top: 1px solid var(--line); display: grid; gap: 5px; }
+  .ra:first-child { border-top: 0; }
+  .ra-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .ra-name { font-weight: 700; }
+  .reasons { margin: 0; padding-left: 18px; font-size: 13.5px; color: var(--ink); }
+  .reasons li { margin: 2px 0; }
+  .reasons li.ok { color: var(--good); }
+  .reasons li.no { color: var(--bad); }
+  .log { font-size: 13.5px; display: grid; gap: 4px; }
+  .log-item { display: flex; justify-content: space-between; gap: 10px; align-items: center; background: #f7f3ea; border-radius: 8px; padding: 6px 10px; }
+
+  /* plan */
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; counter-reset: step; }
+  .step { counter-increment: step; display: grid; grid-template-columns: 34px 1fr; gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 11px; padding: 12px; }
+  .step::before { content: counter(step); width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: var(--accent-soft); color: var(--accent); }
+  .step.kind-establish::before { background: #efe7d4; color: #7a5a17; }
+  .step.kind-blocked::before { background: var(--bad-soft); color: var(--bad); content: "!"; }
+  .step-title { font-weight: 700; }
+  .step-body { display: grid; gap: 5px; font-size: 14px; }
+  .step-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .unlocks { color: var(--accent); font-size: 13.5px; }
+  .reserve-grid { grid-template-columns: minmax(280px, 360px) 1fr; }
+  @media (max-width: 860px) { .reserve-grid { grid-template-columns: 1fr; } .reserve-grid .steps-col { order: -1; } }
+  .grp-pick { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .grp-pick select { padding: 4px 8px; font-size: 14px; }
+  .need-line { font-size: 13.5px; }
+  .need-line.short { color: var(--warn); }
+  .done-box { background: var(--good-soft); color: var(--good); border-radius: 10px; padding: 12px 14px; font-weight: 500; }
+
+  /* dialog */
+  .overlay { position: fixed; inset: 0; background: rgba(30, 36, 28, .45); display: grid; place-items: center; padding: 16px; z-index: 50; }
+  .dialog { background: var(--card); border-radius: 14px; padding: 18px; width: min(460px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; display: grid; gap: 12px; }
+  .dialog h3 { font-size: 19px; }
+  .dialog label.block { display: grid; gap: 4px; font-size: 14px; font-weight: 500; }
+  .dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .opt { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; cursor: pointer; }
+  .opt:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .opt input { margin-top: 3px; }
+
+  .notice { background: var(--warn-soft); color: var(--warn); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; }
+  .empty { color: var(--muted); padding: 8px 0; }
+  .status { text-align: center; color: var(--muted); padding: 30px 10px; }
+  textarea { width: 100%; min-height: 110px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  footer { padding: 0 10px 24px; color: var(--muted); font-size: 12.5px; }
+
+  .site-nav { display: flex; gap: 4px; padding: 10px 10px 0; flex-wrap: wrap; border-bottom: 1px solid var(--line); background: var(--card); }
+  .site-nav a {
+    text-decoration: none; color: var(--muted); font-weight: 700; font-size: 15px;
+    padding: 10px 14px; border-radius: 10px 10px 0 0; border: 1px solid transparent; border-bottom: 0; margin-bottom: -1px;
+  }
+  .site-nav a:hover { color: var(--ink); }
+  .site-nav a[aria-current="page"] { color: var(--ink); background: var(--bg); border-color: var(--line); }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="config.js"></script>
+<script src="loader.js"></script>
+</head>
+<body>
+<nav class="site-nav" aria-label="Planet Zoo 2 tools"><a href="index.html">Habitat Planner</a><a href="reserves.html" aria-current="page">Reserve Planner</a></nav>
+<header class="top">
+  <div>
+    <h1>Planet Zoo 2 Reserve Planner</h1>
+    <p>Track your zoos and releases, and plan what to do next for each wildlife reserve.</p>
+  </div>
+  <button type="button" class="ghost" id="backup-btn">Backup &amp; restore</button>
+</header>
+<div id="data-warn" class="wrap"></div>
+<div id="storage-note" class="wrap" hidden></div>
+<nav class="tabs" role="tablist" aria-label="Sections">
+  <button type="button" role="tab" data-tab="reserve">Reserves</button>
+  <button type="button" role="tab" data-tab="zoos">My Zoos</button>
+</nav>
+<main class="wrap" id="main"><div class="card status">Loading reserve data…</div></main>
+<div id="dialog-root"></div>
+<footer>Fan-made planning tool. Not affiliated with Frontier Developments. Your progress is saved in this browser only.</footer>
+
+<script>
+/* =========================================================================
+   PART 1 — RESERVE RULES
+   Reads the spreadsheet data and works out what can be released and what
+   to do next. Nothing in this part touches the page.
+   ========================================================================= */
+var RP = (function () {
+  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase(); }
+  function blank(v) { return v === null || v === undefined || (typeof v === 'string' && v.trim() === ''); }
+  function num(v) {
+    if (blank(v) || typeof v === 'boolean') return null;
+    if (typeof v === 'number') return isFinite(v) ? v : null;
+    var m = String(v).replace(/,/g, '').match(/-?\d+(\.\d+)?/);
+    return m ? parseFloat(m[0]) : null;
+  }
+  function list(v) { return blank(v) ? [] : String(v).split(',').map(function (s) { return s.trim(); }).filter(Boolean); }
+  function table(data, name) {
+    var t = (data.tabs && data.tabs[name]) || { header: [], rows: [] };
+    var idx = {};
+    t.header.forEach(function (h, i) { idx[norm(h)] = i; });
+    return {
+      name: name, header: t.header, rows: t.rows,
+      col: function (/* names */) { for (var i = 0; i < arguments.length; i++) { if (idx[norm(arguments[i])] !== undefined) return idx[norm(arguments[i])]; } return -1; },
+      cols: function (test) { var out = []; t.header.forEach(function (h, i) { if (test(norm(h))) out.push(i); }); return out; }
+    };
+  }
+  function term(text) {
+    var flour = /flourish/i.test(text);
+    var name = String(text).replace(/\(.*?\)/g, '').trim();
+    return { eco: norm(name), name: name, flourishing: flour };
+  }
+
+  function buildModel(data) {
+    var warnings = [];
+    (data.missingTabs || []).forEach(function (t) { warnings.push('The "' + t + '" tab was not found.'); });
+    var R = table(data, 'Reserves'), A = table(data, 'Animals'), G = table(data, 'Release Groups');
+    var charNames = {};
+    function charKey(name) { var k = norm(name); if (!charNames[k]) charNames[k] = String(name).trim(); return k; }
+
+    // Reserves & ecosystems
+    var rRes = R.col('Reserve'), rEco = R.col('Ecosystems', 'Ecosystem'), rNeed = R.col('Flourishing Needs');
+    if (rRes < 0 || rEco < 0) warnings.push('The Reserves tab needs "Reserve" and "Ecosystems" headings.');
+    var reserves = [], resByKey = {}, ecoNames = {};
+    R.rows.forEach(function (r) {
+      var rn = r[rRes], en = r[rEco];
+      if (blank(rn) || blank(en)) return;
+      var rk = norm(rn);
+      if (!resByKey[rk]) { resByKey[rk] = { key: rk, name: String(rn).trim(), ecos: [], ecoByKey: {} }; reserves.push(resByKey[rk]); }
+      var ek = norm(en);
+      ecoNames[ek] = String(en).trim();
+      if (resByKey[rk].ecoByKey[ek]) return;
+      var e = { key: ek, name: String(en).trim(), needs: list(rNeed >= 0 ? r[rNeed] : '').map(charKey) };
+      resByKey[rk].ecos.push(e);
+      resByKey[rk].ecoByKey[ek] = e;
+    });
+
+    // Animals (one or more rows each)
+    var aName = A.col('Animal'), aRes = A.col('Reserves'), aChar = A.col('Characteristics'),
+        aAlways = A.col('Ecosystems Always Needed'), aReq = A.col('Release Requirements', 'Requires Released');
+    var aOpts = A.cols(function (h) { return /^ecosystems needed\s*-\s*option/.test(h) || /^option\s*\d/.test(h); });
+    if (aName < 0 || aRes < 0) warnings.push('The Animals tab needs "Animal" and "Reserves" headings.');
+    var animals = {};
+    A.rows.forEach(function (r) {
+      var nm = r[aName];
+      if (blank(nm)) return;
+      var k = norm(nm);
+      if (!animals[k]) animals[k] = { key: k, name: String(nm).trim(), rows: [], groups: [], collective: false };
+      var row = {
+        reserves: list(r[aRes]).map(norm),
+        chars: list(aChar >= 0 ? r[aChar] : '').map(charKey),
+        always: list(aAlways >= 0 ? r[aAlways] : '').map(term),
+        options: aOpts.map(function (i) { return list(r[i]).map(term); }).filter(function (o) { return o.length; }),
+        requires: list(aReq >= 0 ? r[aReq] : '').map(charKey)
+      };
+      row.reserves.forEach(function (rk) {
+        if (!resByKey[rk]) warnings.push(animals[k].name + ': reserve "' + rk + '" is not on the Reserves tab.');
+        else {
+          var bad = row.always.concat([].concat.apply([], row.options)).filter(function (t) { return !resByKey[rk].ecoByKey[t.eco] && !ecoNames[t.eco]; });
+          bad.forEach(function (t) { warnings.push(animals[k].name + ': ecosystem "' + t.name + '" is not on the Reserves tab.'); });
+        }
+      });
+      if (!row.chars.length) warnings.push(animals[k].name + ' (' + list(r[aRes]).join(', ') + ') has no characteristics.');
+      animals[k].rows.push(row);
+    });
+
+    // Release groups
+    var gA = G.col('Animal'), gN = G.col('Group Name'), gM = G.col('Males'), gF = G.col('Females'),
+        gE = G.col('Either Sex'), gC = G.col('Collectives');
+    var statCols = G.cols(function (h) { return /%\s*$/.test(h); });
+    G.rows.forEach(function (r) {
+      var nm = r[gA];
+      if (blank(nm)) return;
+      var a = animals[norm(nm)];
+      if (!a) { warnings.push('Release group for "' + nm + '" but that animal is not on the Animals tab.'); return; }
+      var g = {
+        name: blank(r[gN]) ? 'Release group' : String(r[gN]).trim(),
+        m: num(gM >= 0 ? r[gM] : null) || 0, f: num(gF >= 0 ? r[gF] : null) || 0,
+        either: num(gE >= 0 ? r[gE] : null) || 0, c: num(gC >= 0 ? r[gC] : null) || 0,
+        stats: []
+      };
+      statCols.forEach(function (i) {
+        var v = num(r[i]);
+        if (v !== null) g.stats.push({ name: String(G.header[i]).replace(/\s*%\s*$/, '').trim(), min: v });
+      });
+      if (g.c) a.collective = true;
+      a.groups.push(g);
+    });
+    Object.keys(animals).forEach(function (k) {
+      if (!animals[k].groups.length) warnings.push(animals[k].name + ' has no release groups.');
+    });
+
+    var animalList = Object.keys(animals).map(function (k) { return animals[k]; })
+      .sort(function (x, y) { return x.name.localeCompare(y.name); });
+    return { reserves: reserves, resByKey: resByKey, animals: animals, animalList: animalList,
+             charNames: charNames, warnings: warnings };
+  }
+
+  function rowFor(a, rk) {
+    for (var i = 0; i < a.rows.length; i++) if (a.rows[i].reserves.indexOf(rk) >= 0) return a.rows[i];
+    return null;
+  }
+  function accepted(model, rk) {
+    return model.animalList.filter(function (a) { return rowFor(a, rk); });
+  }
+  function reservesFor(model, a) {
+    return model.reserves.filter(function (r) { return rowFor(a, r.key); });
+  }
+
+  // Work out everything about one reserve, given established ecosystems and released animals.
+  function evalReserve(model, rk, est, released) {
+    var res = model.resByKey[rk];
+    var chars = {};
+    Object.keys(released).forEach(function (ak) {
+      var a = model.animals[ak]; if (!a) return;
+      var row = rowFor(a, rk); if (!row) return;
+      row.chars.forEach(function (c) { chars[c] = true; });
+    });
+    var eco = {};
+    res.ecos.forEach(function (e) {
+      var missing = e.needs.filter(function (c) { return !chars[c]; });
+      eco[e.key] = { established: !!est[e.key], missing: missing, unknown: !e.needs.length,
+                     flourishing: !!est[e.key] && e.needs.length > 0 && !missing.length };
+    });
+    function termOk(t) {
+      var e = eco[t.eco];
+      if (!e || !e.established) return false;
+      return !t.flourishing || e.flourishing;
+    }
+    function termText(t) { return t.name + (t.flourishing ? ' flourishing' : ' established'); }
+    var animals = {};
+    accepted(model, rk).forEach(function (a) {
+      var row = rowFor(a, rk);
+      var always = row.always.filter(function (t) { return res.ecoByKey[t.eco]; });
+      var options = row.options.filter(function (o) { return o.every(function (t) { return res.ecoByKey[t.eco]; }); });
+      var ecoMissing = always.filter(function (t) { return !termOk(t); }).map(termText);
+      var optionOk = !options.length || options.some(function (o) { return o.every(termOk); });
+      if (!optionOk) ecoMissing.push('one of: ' + options.map(function (o) { return o.map(termText).join(' + '); }).join(' or '));
+      if (!always.length && !options.length && (row.always.length || row.options.length)) ecoMissing.push('none of its ecosystems exist in this reserve');
+      var reqMissing = row.requires.filter(function (c) { return !chars[c]; });
+      animals[a.key] = { released: !!released[a.key], ecoOk: !ecoMissing.length, ecoMissing: ecoMissing,
+                         reqOk: !reqMissing.length, reqMissing: reqMissing,
+                         canRelease: !ecoMissing.length && !reqMissing.length,
+                         ecoTerms: always.concat([].concat.apply([], options)) };
+    });
+    return { chars: chars, eco: eco, animals: animals };
+  }
+
+  // Can a zoo (or the total of all zoos) make a release group?
+  function groupShortfall(g, have) {
+    have = have || { m: 0, f: 0, c: 0 };
+    var m = have.m || 0, f = have.f || 0, c = have.c || 0;
+    var s = { m: Math.max(0, g.m - m), f: Math.max(0, g.f - f), c: Math.max(0, g.c - c), either: 0 };
+    var spare = Math.max(0, m - g.m) + Math.max(0, f - g.f);
+    s.either = Math.max(0, g.either - spare);
+    s.total = s.m + s.f + s.c + s.either;
+    return s;
+  }
+  function shortText(s) {
+    var p = [];
+    if (s.m) p.push(s.m + ' more male' + (s.m > 1 ? 's' : ''));
+    if (s.f) p.push(s.f + ' more female' + (s.f > 1 ? 's' : ''));
+    if (s.either) p.push(s.either + ' more of either sex');
+    if (s.c) p.push(s.c + ' more collective' + (s.c > 1 ? 's' : ''));
+    return p.join(', ');
+  }
+  function groupText(g) {
+    var p = [];
+    if (g.c) p.push(g.c + ' collective' + (g.c > 1 ? 's' : ''));
+    if (g.m) p.push(g.m + ' male' + (g.m > 1 ? 's' : ''));
+    if (g.f) p.push(g.f + ' female' + (g.f > 1 ? 's' : ''));
+    if (g.either) p.push(g.either + ' of either sex');
+    return p.join(', ');
+  }
+  function statText(g) {
+    return g.stats.map(function (s) { return s.name + ' ' + s.min + '%+'; }).join(', ');
+  }
+  // Best group for an animal given the player's zoos.
+  function bestGroup(model, a, zoos) {
+    var best = null;
+    a.groups.forEach(function (g, gi) {
+      var perZoo = zoos.map(function (z) { return { zoo: z, s: groupShortfall(g, z.animals[a.key]) }; });
+      perZoo.sort(function (x, y) { return x.s.total - y.s.total; });
+      var top = perZoo[0] || { zoo: null, s: groupShortfall(g, null) };
+      var size = g.m + g.f + g.either + g.c;
+      var cand = { group: g, index: gi, zoo: top.zoo, short: top.s, ready: top.s.total === 0, size: size };
+      if (!best || cand.short.total < best.short.total ||
+          (cand.short.total === best.short.total && (cand.size < best.size ||
+            (cand.size === best.size && cand.group.stats.length < best.group.stats.length)))) best = cand;
+    });
+    return best;
+  }
+
+  // The group the player chose for an animal (by name), or the best match if none chosen.
+  function groupFor(model, a, zoos, prefName) {
+    var idx = -1;
+    if (prefName) a.groups.forEach(function (g, i) { if (idx < 0 && norm(g.name) === norm(prefName)) idx = i; });
+    if (idx < 0) { var b = bestGroup(model, a, zoos); if (b) b.auto = true; return b; }
+    var g = a.groups[idx];
+    var perZoo = zoos.map(function (z) { return { zoo: z, s: groupShortfall(g, z.animals[a.key]) }; });
+    perZoo.sort(function (x, y) { return x.s.total - y.s.total; });
+    var top = perZoo[0] || { zoo: null, s: groupShortfall(g, null) };
+    return { group: g, index: idx, zoo: top.zoo, short: top.s, ready: top.s.total === 0, size: g.m + g.f + g.either + g.c, auto: false };
+  }
+
+  // Ordered plan to finish one reserve.
+  function plan(model, rk, state) {
+    var rs = state.reserves[rk] || { established: {}, releases: [] };
+    var est = Object.assign({}, rs.established);
+    var released = {};
+    rs.releases.forEach(function (r) { released[r.animal] = true; });
+    var res = model.resByKey[rk];
+    var acc = accepted(model, rk);
+    var zoos = state.zoos;
+    var steps = [];
+
+    function snapshot() { return evalReserve(model, rk, est, released); }
+    function releasableSet(ev) {
+      var s = {};
+      acc.forEach(function (a) { if (!released[a.key] && ev.animals[a.key].canRelease) s[a.key] = true; });
+      return s;
+    }
+    function gains(before, after) {
+      var unlocked = acc.filter(function (a) { return !released[a.key] && after.animals[a.key].canRelease && !before.animals[a.key].canRelease; })
+        .map(function (a) { return a.name; });
+      var flour = res.ecos.filter(function (e) { return after.eco[e.key].flourishing && !before.eco[e.key].flourishing; })
+        .map(function (e) { return e.name; });
+      return { unlocked: unlocked, flourish: flour, score: unlocked.length * 2 + flour.length };
+    }
+
+    // Which animals the player already has enough of (zoo counts don't change while planning)
+    var groupInfo = {}, ready = {};
+    acc.forEach(function (a) {
+      groupInfo[a.key] = groupFor(model, a, zoos, ((state.groupPrefs || {})[rk] || {})[a.key]);
+      ready[a.key] = !!(groupInfo[a.key] && groupInfo[a.key].ready);
+    });
+
+    function bestRelease(list, ev) {
+      var best = null;
+      list.forEach(function (a) {
+        released[a.key] = true;
+        var g = gains(ev, snapshot());
+        delete released[a.key];
+        var cand = { a: a, g: g, bg: groupInfo[a.key] };
+        if (!best || g.score > best.g.score) best = cand;
+      });
+      return best;
+    }
+    function bestEstablish(ev, readyOnly) {
+      var notEst = res.ecos.filter(function (e) { return !est[e.key]; });
+      var remaining = acc.filter(function (a) { return !released[a.key]; });
+      var best = null;
+      notEst.forEach(function (e) {
+        est[e.key] = true;
+        var after = snapshot();
+        var g = gains(ev, after);
+        delete est[e.key];
+        var readyUnlocks = acc.filter(function (a) { return ready[a.key] && !released[a.key] && after.animals[a.key].canRelease && !ev.animals[a.key].canRelease; }).length;
+        if (readyOnly && !readyUnlocks) return;
+        var mentions = remaining.filter(function (a) {
+          return ev.animals[a.key].ecoTerms.some(function (t) { return t.eco === e.key; });
+        }).length;
+        var cand = { e: e, g: g, mentions: mentions, readyUnlocks: readyUnlocks };
+        if (!best || readyUnlocks > best.readyUnlocks ||
+            (readyUnlocks === best.readyUnlocks && (g.unlocked.length > best.g.unlocked.length ||
+              (g.unlocked.length === best.g.unlocked.length && mentions > best.mentions)))) best = cand;
+      });
+      return best;
+    }
+    // Roughly how many steps an animal still needs before it can be released.
+    // Missing characteristics (for flourishing or prey) cost 1 plus however far the
+    // nearest animal with that characteristic is from being released itself.
+    function distance(ev, a, depth, visiting) {
+      depth = depth || 0; visiting = visiting || {};
+      if (released[a.key]) return 0;
+      if (ev.animals[a.key].canRelease) return depth ? 1 : 0;
+      if (depth > 3 || visiting[a.key]) return 50;
+      visiting[a.key] = true;
+      var row = rowFor(a, rk);
+      function charCost(ch) {
+        if (ev.chars[ch]) return 0;
+        var best = 50;
+        acc.forEach(function (b) {
+          if (b.key === a.key || released[b.key]) return;
+          if (rowFor(b, rk).chars.indexOf(ch) < 0) return;
+          best = Math.min(best, distance(ev, b, depth + 1, visiting));
+        });
+        return best;
+      }
+      function termsCost(terms) {
+        var c = 0, chars = {};
+        terms.forEach(function (t) {
+          var e = ev.eco[t.eco];
+          if (!e) { c += 50; return; }
+          if (!e.established) c += 1;
+          if (t.flourishing && !e.flourishing) {
+            if (e.unknown) c += 50;
+            else e.missing.forEach(function (ch) { chars[ch] = true; });
+          }
+        });
+        return { c: c, chars: chars };
+      }
+      var always = termsCost(row.always.filter(function (t) { return res.ecoByKey[t.eco]; }));
+      var chars = always.chars, cost = always.c;
+      var opts = row.options.filter(function (o) { return o.every(function (t) { return res.ecoByKey[t.eco]; }); });
+      if (opts.length) {
+        var bestO = null;
+        opts.forEach(function (o) {
+          var tc = termsCost(o), extra = 0;
+          Object.keys(tc.chars).forEach(function (ch) { if (!chars[ch]) extra += charCost(ch); });
+          if (!bestO || tc.c + extra < bestO.total) bestO = { total: tc.c + extra, chars: tc.chars, c: tc.c };
+        });
+        cost += bestO.c;
+        Object.keys(bestO.chars).forEach(function (ch) { chars[ch] = true; });
+      }
+      row.requires.forEach(function (ch) { if (!ev.chars[ch]) chars[ch] = true; });
+      Object.keys(chars).forEach(function (ch) { cost += charCost(ch); });
+      delete visiting[a.key];
+      return Math.min(cost, 50) + (depth ? 1 : 0);
+    }
+    function closestReady(ev) {
+      var d = Infinity;
+      acc.forEach(function (a) { if (ready[a.key] && !released[a.key]) d = Math.min(d, distance(ev, a)); });
+      return d;
+    }
+    // The single step that brings the player's ready animals closest to release.
+    function stepTowardReady(ev, canNow) {
+      var now = closestReady(ev);
+      if (now === Infinity || now === 0) return null;
+      var best = null;
+      function consider(kind, item, apply, undo) {
+        apply();
+        var after = snapshot();
+        var d = closestReady(after);
+        var g = gains(ev, after);
+        undo();
+        if (d >= now) return;
+        var cand = { kind: kind, item: item, d: d, g: g };
+        if (!best || d < best.d || (d === best.d && (kind === 'establish' && best.kind !== 'establish' || g.score > best.g.score))) best = cand;
+      }
+      res.ecos.forEach(function (e) {
+        if (est[e.key]) return;
+        consider('establish', e, function () { est[e.key] = true; }, function () { delete est[e.key]; });
+      });
+      canNow.forEach(function (a) {
+        consider('release', a, function () { released[a.key] = true; }, function () { delete released[a.key]; });
+      });
+      return best;
+    }
+    function doRelease(c) {
+      released[c.a.key] = true;
+      steps.push({ kind: 'release', animal: c.a.key, name: c.a.name, unlocked: c.g.unlocked, flourish: c.g.flourish, best: c.bg });
+    }
+    function doEstablish(c) {
+      est[c.e.key] = true;
+      steps.push({ kind: 'establish', eco: c.e.key, name: c.e.name, unlocked: c.g.unlocked, flourish: c.g.flourish });
+    }
+
+    var guard = 0;
+    while (guard++ < 400) {
+      var ev = snapshot();
+      var canNow = acc.filter(function (a) { return !released[a.key] && ev.animals[a.key].canRelease; });
+      // 1. Release animals the player already has enough of
+      var readyNow = canNow.filter(function (a) { return ready[a.key]; });
+      if (readyNow.length) { doRelease(bestRelease(readyNow, ev)); continue; }
+      // 2. Take the step that gets the player's ready animals closest to release
+      var toward = stepTowardReady(ev, canNow);
+      if (toward) {
+        if (toward.kind === 'establish') doEstablish({ e: toward.item, g: toward.g });
+        else doRelease({ a: toward.item, g: toward.g, bg: groupInfo[toward.item.key] });
+        continue;
+      }
+      // 3. Otherwise: release whatever unlocks the most (these need breeding first)
+      if (canNow.length) { doRelease(bestRelease(canNow, ev)); continue; }
+      // 4. Nothing can be released: establish the most useful ecosystem
+      var anyE = bestEstablish(ev, false);
+      if (!anyE) break;
+      doEstablish(anyE);
+    }
+
+    // Anything still impossible?
+    var end = snapshot();
+    acc.forEach(function (a) {
+      if (released[a.key]) return;
+      var st = end.animals[a.key];
+      var why = st.ecoMissing.concat(st.reqMissing.map(function (c) { return model.charNames[c] + ' released in this reserve'; }));
+      steps.push({ kind: 'blocked', name: a.name, text: 'Can’t be released with the current data. Still needs: ' + why.join('; ') + '.' });
+    });
+    res.ecos.forEach(function (e) {
+      var st = end.eco[e.key];
+      if (st.flourishing) return;
+      if (st.unknown) steps.push({ kind: 'blocked', name: e.name, text: 'Flourishing needs have not been entered for this ecosystem yet.' });
+      else steps.push({ kind: 'blocked', name: e.name, text: 'Can’t flourish: no animal this reserve accepts has ' + st.missing.map(function (c) { return model.charNames[c]; }).join(', ') + '.' });
+    });
+    return steps;
+  }
+
+  function progress(model, rk, state) {
+    var rs = state.reserves[rk] || { established: {}, releases: [] };
+    var released = {};
+    rs.releases.forEach(function (r) { released[r.animal] = true; });
+    var ev = evalReserve(model, rk, rs.established, released);
+    var acc = accepted(model, rk);
+    var res = model.resByKey[rk];
+    var p = {
+      animals: acc.length, released: acc.filter(function (a) { return released[a.key]; }).length,
+      ecos: res.ecos.length,
+      established: res.ecos.filter(function (e) { return ev.eco[e.key].established; }).length,
+      flourishing: res.ecos.filter(function (e) { return ev.eco[e.key].flourishing; }).length
+    };
+    p.total = p.animals + p.ecos * 2;
+    p.done = p.released + p.established + p.flourishing;
+    p.pct = p.total ? Math.round(p.done / p.total * 100) : 0;
+    return p;
+  }
+
+  return { norm: norm, buildModel: buildModel, rowFor: rowFor, accepted: accepted, reservesFor: reservesFor,
+           evalReserve: evalReserve, groupShortfall: groupShortfall, shortText: shortText, groupText: groupText,
+           statText: statText, bestGroup: bestGroup, groupFor: groupFor, plan: plan, progress: progress };
+})();
+
+/* =========================================================================
+   PART 2 — SAVED PROGRESS
+   Each player's zoos and releases are kept in their own browser.
+   ========================================================================= */
+var STORE_KEY = 'pz2-reserve-planner-v1';
+function emptyState() { return { version: 1, zoos: [], reserves: {}, groupPrefs: {}, ui: { tab: 'reserve', reserve: null, zoo: null } }; }
+function cleanState(s) {
+  var e = emptyState();
+  if (!s || typeof s !== 'object') return e;
+  e.zoos = Array.isArray(s.zoos) ? s.zoos.filter(function (z) { return z && z.id && typeof z.name === 'string'; })
+    .map(function (z) { return { id: String(z.id), name: z.name, animals: (z.animals && typeof z.animals === 'object') ? z.animals : {} }; }) : [];
+  if (s.reserves && typeof s.reserves === 'object') {
+    Object.keys(s.reserves).forEach(function (k) {
+      var r = s.reserves[k] || {};
+      e.reserves[k] = { established: (r.established && typeof r.established === 'object') ? r.established : {},
+                        releases: Array.isArray(r.releases) ? r.releases.filter(function (x) { return x && x.animal; }) : [] };
+    });
+  }
+  if (s.ui && typeof s.ui === 'object') Object.assign(e.ui, s.ui);
+  // groupPrefs: { reserve: { animal: group name } } — a separate choice for each reserve
+  if (s.groupPrefs && typeof s.groupPrefs === 'object') {
+    Object.keys(s.groupPrefs).forEach(function (rk) {
+      var p = s.groupPrefs[rk];
+      if (!p || typeof p !== 'object') return;
+      e.groupPrefs[rk] = {};
+      Object.keys(p).forEach(function (ak) { if (typeof p[ak] === 'string') e.groupPrefs[rk][ak] = p[ak]; });
+    });
+  }
+  return e;
+}
+
+/* =========================================================================
+   PART 3 — THE PAGE
+   ========================================================================= */
+if (typeof document !== 'undefined') (function () {
+  var model = null, state = emptyState(), storageOk = true;
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+  function load() {
+    try {
+      var raw = window.localStorage.getItem(STORE_KEY);
+      state = raw ? cleanState(JSON.parse(raw)) : emptyState();
+    } catch (e) { storageOk = false; state = emptyState(); }
+  }
+  function save() {
+    try { window.localStorage.setItem(STORE_KEY, JSON.stringify(state)); storageOk = true; }
+    catch (e) { storageOk = false; }
+    $('storage-note').hidden = storageOk;
+    if (!storageOk) $('storage-note').innerHTML = '<div class="notice">This browser isn’t letting the planner save your progress. Use <strong>Backup &amp; restore</strong> to keep a copy before you leave.</div>';
+  }
+  function reserveState(rk) {
+    if (!state.reserves[rk]) state.reserves[rk] = { established: {}, releases: [] };
+    return state.reserves[rk];
+  }
+  function releasedMap(rk) {
+    var m = {};
+    reserveState(rk).releases.forEach(function (r) { m[r.animal] = (m[r.animal] || 0) + 1; });
+    return m;
+  }
+  function zooById(id) { return state.zoos.filter(function (z) { return z.id === id; })[0] || null; }
+  function animalName(k) { return model.animals[k] ? model.animals[k].name : k + ' (no longer in the data)'; }
+  function charList(keys) { return keys.map(function (c) { return model.charNames[c] || c; }).join(', '); }
+  // The release group the player chose for this animal in a reserve (or the best match).
+  function prefFor(rk, ak) { return rk && state.groupPrefs[rk] ? state.groupPrefs[rk][ak] : null; }
+  function chosen(a, zoos, rk) { return RP.groupFor(model, a, zoos || state.zoos, prefFor(rk, a.key)); }
+  function groupSelect(a, rk) {
+    if (a.groups.length < 2) return '';
+    var pref = prefFor(rk, a.key) || '';
+    return '<label class="grp-pick"><span class="muted small">Release group</span><select data-grouppref="' + esc(a.key) + '" data-pref-reserve="' + esc(rk) + '" aria-label="Release group for ' + esc(a.name) + '">' +
+      '<option value="">Auto (best match)</option>' +
+      a.groups.map(function (g) { return '<option value="' + esc(g.name) + '"' + (RP.norm(g.name) === RP.norm(pref) ? ' selected' : '') + '>' + esc(g.name) + '</option>'; }).join('') +
+      '</select></label>';
+  }
+
+  // ---------- tabs ----------
+  function setTab(t) {
+    state.ui.tab = t; save();
+    document.querySelectorAll('.tabs button').forEach(function (b) { b.setAttribute('aria-selected', b.getAttribute('data-tab') === t ? 'true' : 'false'); });
+    render();
+  }
+  function render() {
+    var t = state.ui.tab;
+    if (t === 'zoos') renderZoos();
+    else renderReserve();
+  }
+  function reservePills() {
+    if (!state.ui.reserve || !model.resByKey[state.ui.reserve]) state.ui.reserve = model.reserves.length ? model.reserves[0].key : null;
+    return '<div class="reserve-pills" role="group" aria-label="Choose a reserve">' + model.reserves.map(function (r) {
+      return '<button type="button" data-reserve="' + esc(r.key) + '" aria-pressed="' + (r.key === state.ui.reserve) + '">' + esc(r.name) + '</button>';
+    }).join('') + '</div>';
+  }
+  function progressCard(rk) {
+    var p = RP.progress(model, rk, state);
+    return '<div class="card progress"><div class="section-title"><h2>' + esc(model.resByKey[rk].name) + '</h2><span class="chip ' + (p.pct === 100 ? 'good' : 'plain') + '">' + p.pct + '% complete</span></div>' +
+      '<div class="bar" aria-hidden="true"><span style="width:' + p.pct + '%"></span></div>' +
+      '<div class="stats-row"><span><strong>' + p.released + '</strong> of ' + p.animals + ' animals released</span>' +
+      '<span><strong>' + p.established + '</strong> of ' + p.ecos + ' ecosystems established</span>' +
+      '<span><strong>' + p.flourishing + '</strong> of ' + p.ecos + ' flourishing</span></div></div>';
+  }
+
+  // ---------- RESERVE (plan + status in one page) ----------
+  function renderReserve() {
+    if (!model.reserves.length) { $('main').innerHTML = '<div class="card empty">No reserves found in the data.</div>'; return; }
+    var pills = reservePills();
+    var rk = state.ui.reserve, res = model.resByKey[rk], rs = reserveState(rk);
+    var relSet = {};
+    rs.releases.forEach(function (r) { relSet[r.animal] = true; });
+    var ev = RP.evalReserve(model, rk, rs.established, relSet);
+    var steps = RP.plan(model, rk, state);
+    var html = [pills, '<div class="stack">', progressCard(rk)];
+    if (!state.zoos.length) html.push('<div class="notice">Add your zoos and their animals on the <strong>My Zoos</strong> tab, and the plan will tell you which zoo to release from and what to breed. Remember: animals bought with cash can’t be released, so only bred animals or ones bought with Conservation Credits count.</div>');
+    html.push('<div class="grid2 reserve-grid">');
+
+    // Left column: ecosystems + release history
+    html.push('<div class="stack side-col"><div class="card"><div class="section-title"><h3>Ecosystems</h3><span class="muted small">Tick when built in the game</span></div><div>');
+    res.ecos.forEach(function (e) {
+      var st = ev.eco[e.key], chip, need;
+      if (st.flourishing) chip = '<span class="chip flour">Flourishing</span>';
+      else if (st.established) chip = '<span class="chip good">Established</span>';
+      else chip = '<span class="chip plain">Not established</span>';
+      if (st.unknown) need = 'Flourishing needs not entered yet';
+      else if (st.flourishing) need = 'Has ' + esc(charList(e.needs));
+      else need = 'To flourish, release: ' + esc(charList(st.missing.length ? st.missing : e.needs));
+      html.push('<label class="eco"><input type="checkbox" data-eco="' + esc(e.key) + '"' + (st.established ? ' checked' : '') + '><span>' + esc(e.name) + '</span>' + chip + '<span class="need">' + need + '</span></label>');
+    });
+    html.push('</div></div>');
+
+    html.push('<div class="card"><div class="section-title"><h3>Release history</h3></div>');
+    var acc = RP.accepted(model, rk);
+    html.push('<div class="row-add" style="margin-bottom:10px"><select id="extra-release" aria-label="Record a release for any animal"><option value="">Record a release for…</option>' +
+      acc.map(function (a) { return '<option value="' + esc(a.key) + '">' + esc(a.name) + (relSet[a.key] ? ' (released)' : '') + '</option>'; }).join('') + '</select></div>');
+    if (!rs.releases.length) html.push('<div class="empty">No releases recorded for this reserve yet.</div>');
+    else {
+      html.push('<div class="log">');
+      rs.releases.slice().reverse().forEach(function (r) {
+        var z = r.zoo ? zooById(r.zoo) : null;
+        html.push('<div class="log-item"><span><strong>' + esc(animalName(r.animal)) + '</strong> · ' + esc(r.group || 'Release group') +
+          (r.zooName ? ' <span class="muted">from ' + esc(z ? z.name : r.zooName) + '</span>' : '') + '</span>' +
+          '<button type="button" class="link" data-undo="' + esc(r.id) + '">Undo</button></div>');
+      });
+      html.push('</div>');
+    }
+    html.push('</div></div>');
+
+    // Right column: next steps
+    var real = steps.filter(function (s) { return s.kind !== 'blocked'; });
+    html.push('<div class="steps-col">');
+    if (!steps.length) html.push('<div class="done-box">This reserve is finished: every animal released and every ecosystem flourishing.</div>');
+    else {
+      html.push('<div class="section-title"><h3>Next steps</h3><span class="muted small">' + real.length + ' step' + (real.length === 1 ? '' : 's') + ' to finish</span></div><ol class="steps">');
+      steps.forEach(function (s) { html.push(stepHtml(rk, s)); });
+      html.push('</ol>');
+    }
+    html.push('</div></div></div>');
+    $('main').innerHTML = html.join('');
+  }
+  function gainsHtml(s) {
+    var parts = [];
+    if (s.unlocked && s.unlocked.length) parts.push('Unlocks ' + esc(s.unlocked.join(', ')));
+    if (s.flourish && s.flourish.length) parts.push('Makes ' + esc(s.flourish.join(', ')) + ' flourish');
+    return parts.length ? '<div class="unlocks">' + parts.join(' · ') + '</div>' : '';
+  }
+  function stepHtml(rk, s) {
+    if (s.kind === 'establish') {
+      var already = reserveState(rk).established[s.eco];
+      return '<li class="step kind-establish"><div class="step-body"><div class="step-title">Establish ' + esc(s.name) + '</div>' + gainsHtml(s) +
+        '<div class="step-actions"><button type="button" class="ghost" data-establish="' + esc(s.eco) + '">Mark as established</button></div></div></li>';
+    }
+    if (s.kind === 'blocked') {
+      return '<li class="step kind-blocked"><div class="step-body"><div class="step-title">' + esc(s.name) + '</div><div class="muted">' + esc(s.text) + '</div></div></li>';
+    }
+    var b = s.best, lines = [];
+    var an = model.animals[s.animal];
+    if (an) lines.push(groupSelect(an, rk));
+    if (!b) lines.push('<div class="need-line short">No release groups are listed for this animal.</div>');
+    else {
+      lines.push('<div class="need-line"><strong>' + esc(b.group.name) + '</strong> · ' + esc(RP.groupText(b.group)) + (b.group.stats.length ? ' · ' + esc(RP.statText(b.group)) : '') + '</div>');
+      if (b.ready && !b.group.stats.length) lines.push('<div class="need-line">Ready from <strong>' + esc(b.zoo.name) + '</strong></div>');
+      else if (b.ready) {
+        var div = b.group.stats.some(function (st) { return /diversity/i.test(st.name); });
+        lines.push('<div class="need-line">Enough animals at <strong>' + esc(b.zoo.name) + '</strong>. Check the stats above on the release group screen in the game' +
+          (div ? ' (related animals, like siblings, won’t meet the Genetic Diversity requirement)' : '') + '.</div>');
+      }
+      else if (b.zoo && b.short.total < (b.group.m + b.group.f + b.group.either + b.group.c)) lines.push('<div class="need-line short">Need ' + esc(RP.shortText(b.short)) + ' at ' + esc(b.zoo.name) + ': breed them or buy with Conservation Credits</div>');
+      else lines.push('<div class="need-line short">Breed or buy with Conservation Credits: ' + esc(RP.groupText(b.group)) + (state.zoos.length ? '' : ' (no zoos added yet)') + '</div>');
+    }
+    return '<li class="step"><div class="step-body"><div class="step-title">Release ' + esc(s.name) + '</div>' + lines.join('') + gainsHtml(s) +
+      '<div class="step-actions"><button type="button" class="ghost" data-release="' + esc(s.animal) + '">Record release</button></div></div></li>';
+  }
+
+  // ---------- MY ZOOS ----------
+  function renderZoos() {
+    if (state.ui.zoo && !zooById(state.ui.zoo)) state.ui.zoo = null;
+    if (!state.ui.zoo && state.zoos.length) state.ui.zoo = state.zoos[0].id;
+    var z = zooById(state.ui.zoo);
+    var html = ['<div class="grid2"><div class="card"><div class="section-title"><h2>My zoos</h2></div>',
+      '<form class="row-add" id="add-zoo"><input type="text" id="zoo-name" placeholder="Zoo name" aria-label="New zoo name" maxlength="60"><button class="primary" type="submit">Add zoo</button></form>',
+      '<div class="zoo-list" style="margin-top:12px">'];
+    if (!state.zoos.length) html.push('<div class="empty">Add a zoo to start tracking your animals.</div>');
+    state.zoos.forEach(function (zz) {
+      var count = Object.keys(zz.animals).length;
+      html.push('<button type="button" class="zoo-pick" data-zoo="' + esc(zz.id) + '" aria-current="' + (zz.id === state.ui.zoo) + '"><span>' + esc(zz.name) + '</span><span class="muted small">' + count + ' species</span></button>');
+    });
+    html.push('</div></div>');
+
+    html.push('<div class="card">');
+    if (!z) html.push('<div class="empty">Choose or add a zoo.</div>');
+    else {
+      html.push('<div class="section-title"><h2>' + esc(z.name) + '</h2><span><button type="button" class="ghost" data-rename="' + esc(z.id) + '">Rename</button> <button type="button" class="ghost danger" data-delzoo="' + esc(z.id) + '">Delete</button></span></div>');
+      html.push('<div class="notice" style="margin-bottom:12px"><strong>Only count releasable animals:</strong> ones you bred, or bought with Conservation Credits. Animals bought with cash can’t be released to reserves, so leave them out of these numbers.</div>');
+      var have = z.animals;
+      var opts = model.animalList.filter(function (a) { return !have[a.key]; });
+      var rf = state.ui.zooReserve || '';
+      if (rf) opts = opts.filter(function (a) { return RP.rowFor(a, rf); });
+      html.push('<div class="row-add"><select id="zoo-res-filter" aria-label="Show animals for reserve"><option value="">All reserves</option>' +
+        model.reserves.map(function (r) { return '<option value="' + esc(r.key) + '"' + (r.key === rf ? ' selected' : '') + '>' + esc(r.name) + '</option>'; }).join('') + '</select>' +
+        '<select id="zoo-add-animal" aria-label="Animal to add"><option value="">Add an animal…</option>' +
+        opts.map(function (a) { return '<option value="' + esc(a.key) + '">' + esc(a.name) + '</option>'; }).join('') + '</select></div>');
+      var keys = Object.keys(have).sort(function (x, y) { return animalName(x).localeCompare(animalName(y)); });
+      if (!keys.length) html.push('<div class="empty" style="margin-top:10px">No animals added to this zoo yet.</div>');
+      keys.forEach(function (k) {
+        var a = model.animals[k], c = have[k];
+        var counts = (a && a.collective)
+          ? '<label>Collectives <input type="number" min="0" step="1" data-count="c" data-animal="' + esc(k) + '" value="' + (c.c || 0) + '"></label>'
+          : '<label>Males <input type="number" min="0" step="1" data-count="m" data-animal="' + esc(k) + '" value="' + (c.m || 0) + '"></label>' +
+            '<label>Females <input type="number" min="0" step="1" data-count="f" data-animal="' + esc(k) + '" value="' + (c.f || 0) + '"></label>';
+        var meta = '';
+        if (a) {
+          var bg = RP.bestGroup(model, a, [z]);
+          meta = 'Goes to ' + esc(RP.reservesFor(model, a).map(function (r) { return r.name; }).join(', ')) + '. ';
+          if (bg) meta += bg.ready ? 'Enough animals for a <strong>' + esc(bg.group.name) + '</strong>' + (bg.group.stats.length ? ' (check stats in the game).' : '.')
+                                   : 'Closest group: ' + esc(bg.group.name) + ' (need ' + esc(RP.shortText(bg.short)) + ').';
+        }
+        html.push('<div class="animal-row"><strong>' + esc(animalName(k)) + '</strong><button type="button" class="icon" data-delanimal="' + esc(k) + '" aria-label="Remove ' + esc(animalName(k)) + '">×</button>' +
+          '<div class="counts">' + counts + '</div><span></span><div class="meta">' + meta + '</div></div>');
+      });
+    }
+    html.push('</div></div>');
+    $('main').innerHTML = html.join('');
+  }
+
+  // ---------- dialogs ----------
+  function openDialog(html, onMount) {
+    $('dialog-root').innerHTML = '<div class="overlay" id="overlay"><div class="dialog" role="dialog" aria-modal="true">' + html + '</div></div>';
+    var first = $('dialog-root').querySelector('input, select, textarea, button');
+    if (first) first.focus();
+    if (onMount) onMount($('dialog-root').querySelector('.dialog'));
+  }
+  function closeDialog() { $('dialog-root').innerHTML = ''; }
+
+  function releaseDialog(ak) {
+    var a = model.animals[ak], rk = state.ui.reserve;
+    if (!a) return;
+    var bg = chosen(a, null, rk);
+    var groupsHtml = a.groups.map(function (g, i) {
+      return '<label class="opt"><input type="radio" name="grp" value="' + i + '"' + (bg && bg.index === i ? ' checked' : '') + '><span><strong>' + esc(g.name) + '</strong><br><span class="small muted">' +
+        esc(RP.groupText(g)) + (g.stats.length ? ' · ' + esc(RP.statText(g)) : '') + '</span></span></label>';
+    }).join('');
+    var zooOpts = '<option value="">Not from a tracked zoo</option>' + state.zoos.map(function (z) {
+      return '<option value="' + esc(z.id) + '"' + (bg && bg.zoo && bg.zoo.id === z.id ? ' selected' : '') + '>' + esc(z.name) + '</option>';
+    }).join('');
+    openDialog('<h3>Record release: ' + esc(a.name) + '</h3><div class="small muted">To ' + esc(model.resByKey[rk].name) + '</div>' +
+      '<div style="display:grid;gap:8px">' + (groupsHtml || '<div class="muted">No release groups listed.</div>') + '</div>' +
+      '<label class="block">Released from<select id="rel-zoo">' + zooOpts + '</select></label>' +
+      '<div id="rel-split"></div>' +
+      '<div class="small muted">Only animals you bred or bought with Conservation Credits can be released. The animals are taken off that zoo’s counts, and you can undo this in the release history.</div>' +
+      '<div class="actions"><button type="button" class="ghost" id="dlg-cancel">Cancel</button><button type="button" class="primary" id="dlg-ok">Record release</button></div>',
+      function (d) {
+        function split() {
+          var gi = Number((d.querySelector('input[name=grp]:checked') || {}).value);
+          var g = a.groups[gi], box = d.querySelector('#rel-split');
+          if (!g || !g.either || !d.querySelector('#rel-zoo').value) { box.innerHTML = ''; return; }
+          box.innerHTML = '<label class="block">Of the ' + g.either + ' “either sex” animals, how many are male?<input type="number" id="rel-either-m" min="0" max="' + g.either + '" value="0"></label>';
+        }
+        d.addEventListener('change', split); split();
+        d.querySelector('#dlg-cancel').onclick = closeDialog;
+        d.querySelector('#dlg-ok').onclick = function () {
+          var gi = Number((d.querySelector('input[name=grp]:checked') || {}).value);
+          var g = a.groups[gi] || { name: 'Release group', m: 0, f: 0, either: 0, c: 0 };
+          var zid = d.querySelector('#rel-zoo').value, z = zooById(zid);
+          var em = Math.min(g.either, Math.max(0, Number((d.querySelector('#rel-either-m') || {}).value) || 0));
+          var took = { m: g.m + em, f: g.f + (g.either - em), c: g.c };
+          if (z) {
+            var c = z.animals[ak] || { m: 0, f: 0, c: 0 };
+            took = { m: Math.min(took.m, c.m || 0), f: Math.min(took.f, c.f || 0), c: Math.min(took.c, c.c || 0) };
+            c.m = (c.m || 0) - took.m; c.f = (c.f || 0) - took.f; c.c = (c.c || 0) - took.c;
+            z.animals[ak] = c;
+          }
+          reserveState(rk).releases.push({ id: uid(), animal: ak, group: g.name, zoo: z ? z.id : null, zooName: z ? z.name : null, took: z ? took : null, at: new Date().toISOString() });
+          save(); closeDialog(); render();
+        };
+      });
+  }
+
+  function confirmDialog(title, text, okText, onOk) {
+    openDialog('<h3>' + esc(title) + '</h3><div>' + text + '</div><div class="actions"><button type="button" class="ghost" id="dlg-cancel">Cancel</button><button type="button" class="primary" id="dlg-ok">' + esc(okText) + '</button></div>',
+      function (d) { d.querySelector('#dlg-cancel').onclick = closeDialog; d.querySelector('#dlg-ok').onclick = function () { closeDialog(); onOk(); }; });
+  }
+
+  function backupDialog() {
+    var text = JSON.stringify(state);
+    openDialog('<h3>Backup &amp; restore</h3>' +
+      '<div class="small">Your progress is saved in this browser only. Keep a backup to move it to another device, or in case your browser clears its saved data.</div>' +
+      '<div class="step-actions"><button type="button" class="primary" id="bk-download">Download backup file</button><button type="button" class="ghost" id="bk-copy">Copy backup code</button></div>' +
+      '<label class="block">Restore from a backup<input type="file" id="bk-file" accept=".json,application/json,text/plain"></label>' +
+      '<label class="block">…or paste a backup code<textarea id="bk-text" placeholder="Paste backup code here"></textarea></label>' +
+      '<div id="bk-msg" class="small"></div>' +
+      '<div class="actions"><button type="button" class="ghost danger" id="bk-reset">Start over</button><button type="button" class="ghost" id="dlg-cancel">Close</button><button type="button" class="primary" id="bk-restore">Restore pasted code</button></div>',
+      function (d) {
+        var msg = d.querySelector('#bk-msg');
+        d.querySelector('#dlg-cancel').onclick = closeDialog;
+        d.querySelector('#bk-download').onclick = function () {
+          try {
+            var blob = new Blob([text], { type: 'application/json' });
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'pz2-reserve-planner-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+            document.body.appendChild(a); a.click(); a.remove();
+            msg.textContent = 'Download started. If nothing happened, use “Copy backup code” instead and paste it somewhere safe.';
+          } catch (e) { msg.textContent = 'Downloads are blocked here. Use “Copy backup code” instead.'; }
+        };
+        d.querySelector('#bk-copy').onclick = function () {
+          var ta = d.querySelector('#bk-text');
+          ta.value = text; ta.select();
+          var ok = false;
+          try { ok = document.execCommand('copy'); } catch (e) {}
+          if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { msg.textContent = 'Backup code copied. Paste it into a note or document to keep it.'; }, function () {});
+          msg.textContent = ok ? 'Backup code copied. Paste it into a note or document to keep it.' : 'The code is in the box below. Select it all and copy it.';
+        };
+        function restore(raw) {
+          try {
+            var s = cleanState(JSON.parse(raw));
+            confirmDialog('Restore this backup?', 'This replaces everything currently saved in this browser (' + s.zoos.length + ' zoo' + (s.zoos.length === 1 ? '' : 's') + ' in the backup).', 'Restore', function () {
+              state = s; save(); render();
+            });
+          } catch (e) { msg.textContent = 'That doesn’t look like a backup from this planner.'; }
+        }
+        d.querySelector('#bk-file').onchange = function (e) {
+          var f = e.target.files && e.target.files[0]; if (!f) return;
+          var r = new FileReader(); r.onload = function () { restore(String(r.result)); }; r.readAsText(f);
+        };
+        d.querySelector('#bk-restore').onclick = function () { var v = d.querySelector('#bk-text').value.trim(); if (v) restore(v); };
+        d.querySelector('#bk-reset').onclick = function () {
+          confirmDialog('Start over?', 'This deletes all your zoos, ecosystems and releases from this browser. Download a backup first if you might want them back.', 'Delete everything', function () {
+            var ui = state.ui; state = emptyState(); state.ui.tab = ui.tab; state.ui.reserve = ui.reserve; save(); render();
+          });
+        };
+      });
+  }
+
+  // ---------- events ----------
+  function wire() {
+    document.querySelector('.tabs').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-tab]'); if (b) setTab(b.getAttribute('data-tab'));
+    });
+    $('backup-btn').addEventListener('click', backupDialog);
+    $('dialog-root').addEventListener('click', function (e) { if (e.target.id === 'overlay') closeDialog(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && $('dialog-root').innerHTML) closeDialog(); });
+
+    $('main').addEventListener('click', function (e) {
+      var t = e.target.closest('button'); if (!t) return;
+      var v;
+      if ((v = t.getAttribute('data-reserve'))) { state.ui.reserve = v; save(); render(); }
+      else if ((v = t.getAttribute('data-release'))) releaseDialog(v);
+      else if ((v = t.getAttribute('data-establish'))) { reserveState(state.ui.reserve).established[v] = true; save(); render(); }
+      else if ((v = t.getAttribute('data-undo'))) {
+        var rs = reserveState(state.ui.reserve), rec = rs.releases.filter(function (r) { return r.id === v; })[0];
+        if (!rec) return;
+        confirmDialog('Undo this release?', esc(animalName(rec.animal)) + ' · ' + esc(rec.group) + (rec.took && zooById(rec.zoo) ? '<br>The animals will be added back to ' + esc(zooById(rec.zoo).name) + '.' : ''), 'Undo release', function () {
+          var z = rec.zoo && zooById(rec.zoo);
+          if (z && rec.took) {
+            var c = z.animals[rec.animal] || { m: 0, f: 0, c: 0 };
+            c.m = (c.m || 0) + (rec.took.m || 0); c.f = (c.f || 0) + (rec.took.f || 0); c.c = (c.c || 0) + (rec.took.c || 0);
+            z.animals[rec.animal] = c;
+          }
+          rs.releases = rs.releases.filter(function (r) { return r.id !== v; });
+          save(); render();
+        });
+      }
+      else if ((v = t.getAttribute('data-zoo'))) { state.ui.zoo = v; save(); render(); }
+      else if ((v = t.getAttribute('data-rename'))) {
+        var z = zooById(v);
+        openDialog('<h3>Rename zoo</h3><label class="block">Zoo name<input type="text" id="rn" maxlength="60" value="' + esc(z.name) + '"></label><div class="actions"><button type="button" class="ghost" id="dlg-cancel">Cancel</button><button type="button" class="primary" id="dlg-ok">Save</button></div>',
+          function (d) {
+            d.querySelector('#dlg-cancel').onclick = closeDialog;
+            d.querySelector('#dlg-ok').onclick = function () { var n = d.querySelector('#rn').value.trim(); if (n) { z.name = n; save(); } closeDialog(); render(); };
+          });
+      }
+      else if ((v = t.getAttribute('data-delzoo'))) {
+        var zz = zooById(v);
+        confirmDialog('Delete ' + zz.name + '?', 'This removes the zoo and its animal counts. Releases already recorded stay in each reserve’s history.', 'Delete zoo', function () {
+          state.zoos = state.zoos.filter(function (x) { return x.id !== v; }); state.ui.zoo = null; save(); render();
+        });
+      }
+      else if ((v = t.getAttribute('data-delanimal'))) {
+        var zo = zooById(state.ui.zoo); delete zo.animals[v]; save(); render();
+      }
+    });
+    $('main').addEventListener('submit', function (e) {
+      if (e.target.id !== 'add-zoo') return;
+      e.preventDefault();
+      var n = $('zoo-name').value.trim(); if (!n) return;
+      var z = { id: uid(), name: n, animals: {} };
+      state.zoos.push(z); state.ui.zoo = z.id; save(); render();
+    });
+    $('main').addEventListener('change', function (e) {
+      var t = e.target, v;
+      if ((v = t.getAttribute('data-eco'))) {
+        var rs = reserveState(state.ui.reserve);
+        if (t.checked) rs.established[v] = true; else delete rs.established[v];
+        save(); render();
+      } else if ((v = t.getAttribute('data-grouppref')) !== null) {
+        var prk = t.getAttribute('data-pref-reserve');
+        if (!state.groupPrefs[prk]) state.groupPrefs[prk] = {};
+        if (t.value) state.groupPrefs[prk][v] = t.value; else delete state.groupPrefs[prk][v];
+        save(); render();
+      } else if (t.id === 'extra-release' && t.value) {
+        var pick = t.value; t.value = '';
+        releaseDialog(pick);
+      } else if (t.id === 'zoo-res-filter') { state.ui.zooReserve = t.value; save(); render(); }
+      else if (t.id === 'zoo-add-animal' && t.value) {
+        var z = zooById(state.ui.zoo);
+        z.animals[t.value] = { m: 0, f: 0, c: 0 }; save(); render();
+      } else if (t.getAttribute('data-count')) {
+        var zo = zooById(state.ui.zoo), ak = t.getAttribute('data-animal'), f = t.getAttribute('data-count');
+        zo.animals[ak][f] = Math.max(0, Math.floor(Number(t.value) || 0)); save(); render();
+      }
+    });
+  }
+
+  function start(json) {
+    var data;
+    try { data = typeof json === 'string' ? JSON.parse(json) : json; } catch (e) { return fail('The reserve data could not be read.'); }
+    model = RP.buildModel(data);
+    if (model.warnings.length) {
+      $('data-warn').innerHTML = '<details class="notice" style="margin-bottom:12px"><summary style="cursor:pointer;font-weight:700">Spreadsheet notes (' + model.warnings.length + ')</summary><ul>' +
+        model.warnings.map(function (w) { return '<li>' + esc(w) + '</li>'; }).join('') + '</ul></details>';
+    }
+    load();
+    wire();
+    save();
+    setTab(state.ui.tab === 'zoos' ? 'zoos' : 'reserve');
+  }
+  function fail(msg) { $('main').innerHTML = '<div class="card status">' + esc(msg) + ' Please try refreshing the page.</div>'; }
+
+  if (window.google && google.script && google.script.run) {
+    google.script.run.withSuccessHandler(start).withFailureHandler(function (err) {
+      fail('Something went wrong loading the reserve data (' + (err && err.message ? err.message : err) + ').');
+    }).getData();
+  } else if (window.PZ_DEMO_DATA) start(window.PZ_DEMO_DATA);
+  else if (window.PZ_LOAD) {
+    PZ_LOAD('reserves', ['Reserves', 'Animals', 'Release Groups'])
+      .then(start, function () { fail('The reserve data couldn’t be loaded.'); });
+  }
+  else fail('The reserve data couldn’t be loaded.');
+})();
+</script>
+</body>
+</html>

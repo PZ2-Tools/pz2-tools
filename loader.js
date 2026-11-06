@@ -7,6 +7,18 @@
  *
  * You normally never need to edit this file.
  */
+// Visitor counter (GoatCounter): counts page visits anonymously, no cookies.
+(function () {
+  var GOATCOUNTER = 'https://lmodica.goatcounter.com/count';
+  try {
+    var s = document.createElement('script');
+    s.async = true;
+    s.src = 'https://gc.zgo.at/count.js';
+    s.setAttribute('data-goatcounter', GOATCOUNTER);
+    document.head.appendChild(s);
+  } catch (e) {}
+})();
+
 window.PZ_LOAD = function (which, tabNames) {
   var cfg = (window.PZ_CONFIG || {})[which] || {};
 

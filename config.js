@@ -11,11 +11,11 @@
  */
 window.PZ_CONFIG = {
   habitat: {
-    published: '',
+    published: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRZ_hNc1w2YT5iUHg9_Z8eu82kLKvQXwdFrML7oYMFkwVgoOoSxnD3LpiYzKm8ss7Io0LmMkiR4Z5ej/pub?output=xlsx',
     appsScript: ''
   },
   reserves: {
-    published: '',
+    published: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSU9RqjIzziWhQ8EUAOTPvxsTpmgprn7sGA9F_4AkYa8pjdmBiJRmUkK5Djep5RUh9v7NCLN4srY-Kb/pub?output=xlsx',
     appsScript: ''
   }
 };

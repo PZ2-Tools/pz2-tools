@@ -1462,7 +1462,7 @@ if (typeof document !== 'undefined') (function () {
     var fd = res.food, s6 = [];
     fd.lines.forEach(function (l) {
       s6.push(line(esc(l.who) + ' <span class="muted">· Grade ' + l.grade + '</span>',
-        l.cost === null ? '<span class="muted">Not yet entered</span>' : fmt(l.n) + ' × $' + fmt(l.cost) + ' = $' + fmt(l.sub)));
+        l.cost === null ? '<span class="muted">Not yet entered</span>' : '$' + fmt(l.sub)));
     });
     var totalTxt = fd.lines.length === fd.missing.length ? '<span class="muted">Not yet entered</span>' :
       '$' + fmt(fd.total) + (fd.missing.length ? ' <span class="muted">(some costs not yet entered)</span>' : '');

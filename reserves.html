@@ -114,6 +114,9 @@
   .unlocks { color: var(--accent); font-size: 13.5px; }
   .reserve-grid { grid-template-columns: minmax(280px, 360px) 1fr; }
   @media (max-width: 860px) { .reserve-grid { grid-template-columns: 1fr; } .reserve-grid .steps-col { order: -1; } }
+  .need-list { margin: 3px 0 0; padding-left: 18px; }
+  .need-list li, .reasons ul li { margin: 2px 0; }
+  .reasons ul { margin: 2px 0; padding-left: 18px; }
   .grp-pick { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .grp-pick select { padding: 4px 8px; font-size: 14px; }
   .need-line { font-size: 13.5px; }
@@ -671,6 +674,42 @@ if (typeof document !== 'undefined') (function () {
   function zooById(id) { return state.zoos.filter(function (z) { return z.id === id; })[0] || null; }
   function animalName(k) { return model.animals[k] ? model.animals[k].name : k + ' (no longer in the data)'; }
   function charList(keys) { return keys.map(function (c) { return model.charNames[c] || c; }).join(', '); }
+  // "Spotted Hyena, Secretarybird or White-Backed Vulture (Scavengers)":
+  // the animals this reserve accepts that have a characteristic.
+  function charWithAnimals(rk, ch, exceptKey) {
+    var names = RP.accepted(model, rk).filter(function (a) {
+      return a.key !== exceptKey && RP.rowFor(a, rk).chars.indexOf(ch) >= 0;
+    }).map(function (a) { return a.name; });
+    var label = model.charNames[ch] || ch;
+    if (!names.length) return label + ' (no animal this reserve accepts has it)';
+    var list = names.length === 1 ? names[0] : names.slice(0, -1).join(', ') + ' or ' + names[names.length - 1];
+    return list + ' (' + label + ')';
+  }
+  // Plain-language list of what still stands in the way of releasing an animal.
+  function blockers(rk, a, ev) {
+    var res = model.resByKey[rk], row = RP.rowFor(a, rk), out = [];
+    // Each problem is { text, subs: [lines listed under it] }
+    function termProblem(t) {
+      var e = ev.eco[t.eco], name = res.ecoByKey[t.eco] && res.ecoByKey[t.eco].name;
+      if (!e) return null;
+      if (!e.established && !t.flourishing) return { text: 'Establish ' + name, subs: [] };
+      if (!t.flourishing || e.flourishing) return null;
+      var subs = (e.missing.length ? e.missing : res.ecoByKey[t.eco].needs).map(function (ch) { return charWithAnimals(rk, ch); });
+      return { text: e.established ? name + ' must be flourishing. Release:' : 'Establish ' + name + ', then make it flourish. Release:', subs: subs };
+    }
+    row.always.forEach(function (t) { if (res.ecoByKey[t.eco]) { var p = termProblem(t); if (p) out.push(p); } });
+    var opts = row.options.filter(function (o) { return o.every(function (t) { return res.ecoByKey[t.eco]; }); });
+    if (opts.length === 1) {
+      opts[0].forEach(function (t) { var p = termProblem(t); if (p) out.push(p); });
+    } else if (opts.length && !opts.some(function (o) { return o.every(function (t) { return !termProblem(t); }); })) {
+      out.push({ text: 'One of these:', subs: opts.map(function (o) {
+        return o.map(function (t) { var p = termProblem(t); return p ? p.text.replace(/\. Release:$/, '') : res.ecoByKey[t.eco].name + ' (done)'; }).join(' + ');
+      }) });
+    }
+    row.requires.forEach(function (ch) { if (!ev.chars[ch]) out.push({ text: 'Release ' + charWithAnimals(rk, ch, a.key) + ' here first', subs: [] }); });
+    return out;
+  }
+
   // The release group the player chose for this animal in a reserve (or the best match).
   function prefFor(rk, ak) { return rk && state.groupPrefs[rk] ? state.groupPrefs[rk][ak] : null; }
   function chosen(a, zoos, rk) { return RP.groupFor(model, a, zoos || state.zoos, prefFor(rk, a.key)); }
@@ -731,7 +770,7 @@ if (typeof document !== 'undefined') (function () {
       else chip = '<span class="chip plain">Not established</span>';
       if (st.unknown) need = 'Flourishing needs not entered yet';
       else if (st.flourishing) need = 'Has ' + esc(charList(e.needs));
-      else need = 'To flourish, release: ' + esc(charList(st.missing.length ? st.missing : e.needs));
+      else need = 'To flourish, release:<ul class="need-list">' + (st.missing.length ? st.missing : e.needs).map(function (ch) { return '<li>' + esc(charWithAnimals(rk, ch)) + '</li>'; }).join('') + '</ul>';
       html.push('<label class="eco"><input type="checkbox" data-eco="' + esc(e.key) + '"' + (st.established ? ' checked' : '') + '><span>' + esc(e.name) + '</span>' + chip + '<span class="need">' + need + '</span></label>');
     });
     html.push('</div></div>');
@@ -874,16 +913,42 @@ if (typeof document !== 'undefined') (function () {
       '<div style="display:grid;gap:8px">' + (groupsHtml || '<div class="muted">No release groups listed.</div>') + '</div>' +
       '<label class="block">Released from<select id="rel-zoo">' + zooOpts + '</select></label>' +
       '<div id="rel-split"></div>' +
+      '<div id="rel-warn"></div>' +
       '<div class="small muted">Only animals you bred or bought with Conservation Credits can be released. The animals are taken off that zoo’s counts, and you can undo this in the release history.</div>' +
       '<div class="actions"><button type="button" class="ghost" id="dlg-cancel">Cancel</button><button type="button" class="primary" id="dlg-ok">Record release</button></div>',
       function (d) {
-        function split() {
+        // Requirements check (doesn't change while the window is open)
+        var rs = reserveState(rk), relSet = {};
+        rs.releases.forEach(function (r) { relSet[r.animal] = true; });
+        var ev = RP.evalReserve(model, rk, rs.established, relSet);
+        var reqProblems = ev.animals[ak] && !ev.animals[ak].canRelease ? blockers(rk, a, ev) : [];
+        function countText(o, collective) {
+          if (collective) return (o.c || 0) + ' collective' + ((o.c || 0) === 1 ? '' : 's');
+          return (o.m || 0) + ' male' + ((o.m || 0) === 1 ? '' : 's') + ', ' + (o.f || 0) + ' female' + ((o.f || 0) === 1 ? '' : 's');
+        }
+        function update() {
           var gi = Number((d.querySelector('input[name=grp]:checked') || {}).value);
           var g = a.groups[gi], box = d.querySelector('#rel-split');
-          if (!g || !g.either || !d.querySelector('#rel-zoo').value) { box.innerHTML = ''; return; }
-          box.innerHTML = '<label class="block">Of the ' + g.either + ' “either sex” animals, how many are male?<input type="number" id="rel-either-m" min="0" max="' + g.either + '" value="0"></label>';
+          var zid = d.querySelector('#rel-zoo').value, z = zooById(zid);
+          // "Either sex" split
+          if (!g || !g.either || !zid) box.innerHTML = '';
+          else if (!d.querySelector('#rel-either-m')) box.innerHTML = '<label class="block">Of the ' + g.either + ' “either sex” animals, how many are male?<input type="number" id="rel-either-m" min="0" max="' + g.either + '" value="0"></label>';
+          // Warnings
+          var parts = [];
+          if (reqProblems.length) parts.push('<strong>Not unlocked yet in your tracker:</strong><ul class="reasons">' + reqProblems.map(function (p) { return '<li>' + esc(p.text) + (p.subs.length ? '<ul>' + p.subs.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '') + '</li>'; }).join('') + '</ul>');
+          if (g && z) {
+            var em = Math.min(g.either, Math.max(0, Number((d.querySelector('#rel-either-m') || {}).value) || 0));
+            var need = { m: g.m + em, f: g.f + (g.either - em), c: g.c };
+            var have = z.animals[ak] || { m: 0, f: 0, c: 0 };
+            if ((have.m || 0) < need.m || (have.f || 0) < need.f || (have.c || 0) < need.c) {
+              parts.push('<strong>Not enough animals at ' + esc(z.name) + ':</strong> this group needs ' + esc(countText(need, a.collective)) + '; you have ' + esc(countText(have, a.collective)) + '.');
+            }
+          }
+          d.querySelector('#rel-warn').innerHTML = parts.length ? '<div class="notice">' + parts.join('<div style="height:8px"></div>') +
+            '<div style="margin-top:8px">If you’ve already done this in the game, choose <strong>Record anyway</strong>.</div></div>' : '';
+          d.querySelector('#dlg-ok').textContent = parts.length ? 'Record anyway' : 'Record release';
         }
-        d.addEventListener('change', split); split();
+        d.addEventListener('change', update); d.addEventListener('input', update); update();
         d.querySelector('#dlg-cancel').onclick = closeDialog;
         d.querySelector('#dlg-ok').onclick = function () {
           var gi = Number((d.querySelector('input[name=grp]:checked') || {}).value);

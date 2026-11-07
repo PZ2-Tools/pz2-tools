@@ -117,6 +117,20 @@
   .need-list { margin: 3px 0 0; padding-left: 18px; }
   .need-list li, .reasons ul li { margin: 2px 0; }
   .reasons ul { margin: 2px 0; padding-left: 18px; }
+  .toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 20px); z-index: 60;
+    background: var(--accent); color: #fff; font-weight: 700; padding: 11px 18px; border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.18); opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s;
+    max-width: calc(100% - 32px); text-align: center;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .step { position: relative; }
+  .step.locked { background: #faf7f1; }
+  .step.locked .step-title { color: var(--muted); }
+  .lock-badge { position: absolute; top: 10px; right: 12px; color: var(--muted); }
+  .unlock-needs { color: var(--bad); font-size: 13.5px; margin-top: 4px; }
+  .unlock-needs ul { margin: 3px 0 0; padding-left: 18px; }
+  .unlock-needs li { margin: 2px 0; }
   .grp-pick { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .grp-pick select { padding: 4px 8px; font-size: 14px; }
   .need-line { font-size: 13.5px; }
@@ -168,6 +182,7 @@
 </nav>
 <main class="wrap" id="main"><div class="card status">Loading reserve data…</div></main>
 <div id="dialog-root"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
 <footer>Fan-made planning tool. Not affiliated with Frontier Developments. Your progress is saved in this browser only.</footer>
 
 <script>
@@ -778,7 +793,10 @@ if (typeof document !== 'undefined') (function () {
     html.push('<div class="card"><div class="section-title"><h3>Release history</h3></div>');
     var acc = RP.accepted(model, rk);
     html.push('<div class="row-add" style="margin-bottom:10px"><select id="extra-release" aria-label="Record a release for any animal"><option value="">Record a release for…</option>' +
-      acc.map(function (a) { return '<option value="' + esc(a.key) + '">' + esc(a.name) + (relSet[a.key] ? ' (released)' : '') + '</option>'; }).join('') + '</select></div>');
+      acc.map(function (a) {
+        var lockedA = !ev.animals[a.key].canRelease;
+        return '<option value="' + esc(a.key) + '"' + (lockedA ? ' disabled' : '') + '>' + (lockedA ? '🔒 ' : '') + esc(a.name) + (relSet[a.key] ? ' (released)' : '') + '</option>';
+      }).join('') + '</select></div>');
     if (!rs.releases.length) html.push('<div class="empty">No releases recorded for this reserve yet.</div>');
     else {
       html.push('<div class="log">');
@@ -798,7 +816,7 @@ if (typeof document !== 'undefined') (function () {
     if (!steps.length) html.push('<div class="done-box">This reserve is finished: every animal released and every ecosystem flourishing.</div>');
     else {
       html.push('<div class="section-title"><h3>Next steps</h3><span class="muted small">' + real.length + ' step' + (real.length === 1 ? '' : 's') + ' to finish</span></div><ol class="steps">');
-      steps.forEach(function (s) { html.push(stepHtml(rk, s)); });
+      steps.forEach(function (s) { html.push(stepHtml(rk, s, ev)); });
       html.push('</ol>');
     }
     html.push('</div></div></div>');
@@ -810,7 +828,7 @@ if (typeof document !== 'undefined') (function () {
     if (s.flourish && s.flourish.length) parts.push('Makes ' + esc(s.flourish.join(', ')) + ' flourish');
     return parts.length ? '<div class="unlocks">' + parts.join(' · ') + '</div>' : '';
   }
-  function stepHtml(rk, s) {
+  function stepHtml(rk, s, ev) {
     if (s.kind === 'establish') {
       var already = reserveState(rk).established[s.eco];
       return '<li class="step kind-establish"><div class="step-body"><div class="step-title">Establish ' + esc(s.name) + '</div>' + gainsHtml(s) +
@@ -834,8 +852,18 @@ if (typeof document !== 'undefined') (function () {
       else if (b.zoo && b.short.total < (b.group.m + b.group.f + b.group.either + b.group.c)) lines.push('<div class="need-line short">Need ' + esc(RP.shortText(b.short)) + ' at ' + esc(b.zoo.name) + ': breed them or buy with Conservation Credits</div>');
       else lines.push('<div class="need-line short">Breed or buy with Conservation Credits: ' + esc(RP.groupText(b.group)) + (state.zoos.length ? '' : ' (no zoos added yet)') + '</div>');
     }
-    return '<li class="step"><div class="step-body"><div class="step-title">Release ' + esc(s.name) + '</div>' + lines.join('') + gainsHtml(s) +
-      '<div class="step-actions"><button type="button" class="ghost" data-release="' + esc(s.animal) + '">Record release</button></div></div></li>';
+    var locked = an && ev && ev.animals[s.animal] && !ev.animals[s.animal].canRelease;
+    var action;
+    if (locked) {
+      var probs = blockers(rk, an, ev);
+      action = '<div class="unlock-needs"><strong>Locked. To unlock in ' + esc(model.resByKey[rk].name) + ':</strong><ul>' +
+        probs.map(function (p) { return '<li>' + esc(p.text) + (p.subs.length ? '<ul>' + p.subs.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '') + '</li>'; }).join('') +
+        '</ul></div>';
+    } else {
+      action = '<div class="step-actions"><button type="button" class="ghost" data-release="' + esc(s.animal) + '">Record release</button></div>';
+    }
+    return '<li class="step' + (locked ? ' locked' : '') + '">' + (locked ? '<span class="lock-badge" title="Locked"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5Zm-3 8V7a3 3 0 1 1 6 0v3H9Z"/></svg></span>' : '') +
+      '<div class="step-body"><div class="step-title">Release ' + esc(s.name) + '</div>' + lines.join('') + gainsHtml(s) + action + '</div></li>';
   }
 
   // ---------- MY ZOOS ----------
@@ -897,6 +925,14 @@ if (typeof document !== 'undefined') (function () {
     if (onMount) onMount($('dialog-root').querySelector('.dialog'));
   }
   function closeDialog() { $('dialog-root').innerHTML = ''; }
+  var toastTimer = null;
+  function toast(msg) {
+    var t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, 4000);
+  }
 
   function releaseDialog(ak) {
     var a = model.animals[ak], rk = state.ui.reserve;
@@ -921,7 +957,7 @@ if (typeof document !== 'undefined') (function () {
         var rs = reserveState(rk), relSet = {};
         rs.releases.forEach(function (r) { relSet[r.animal] = true; });
         var ev = RP.evalReserve(model, rk, rs.established, relSet);
-        var reqProblems = ev.animals[ak] && !ev.animals[ak].canRelease ? blockers(rk, a, ev) : [];
+        var reqProblems = []; // locked animals can't be released, so no requirements warning here
         function countText(o, collective) {
           if (collective) return (o.c || 0) + ' collective' + ((o.c || 0) === 1 ? '' : 's');
           return (o.m || 0) + ' male' + ((o.m || 0) === 1 ? '' : 's') + ', ' + (o.f || 0) + ' female' + ((o.f || 0) === 1 ? '' : 's');
@@ -964,6 +1000,7 @@ if (typeof document !== 'undefined') (function () {
           }
           reserveState(rk).releases.push({ id: uid(), animal: ak, group: g.name, zoo: z ? z.id : null, zooName: z ? z.name : null, took: z ? took : null, at: new Date().toISOString() });
           save(); closeDialog(); render();
+          toast(a.name + ' released to ' + model.resByKey[rk].name + ' ✓');
         };
       });
   }
@@ -1030,7 +1067,7 @@ if (typeof document !== 'undefined') (function () {
       var b = e.target.closest('button[data-tab]'); if (b) setTab(b.getAttribute('data-tab'));
     });
     $('backup-btn').addEventListener('click', backupDialog);
-    $('dialog-root').addEventListener('click', function (e) { if (e.target.id === 'overlay') closeDialog(); });
+    // Clicking the dimmed background does nothing, so a near-miss can't close a window without saving.
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && $('dialog-root').innerHTML) closeDialog(); });
 
     $('main').addEventListener('click', function (e) {

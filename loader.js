@@ -10,6 +10,7 @@
 // Visitor counter (GoatCounter): counts page visits anonymously, no cookies.
 (function () {
   var GOATCOUNTER = 'https://lmodica.goatcounter.com/count';
+  if (window.PZ_NO_COUNT) return; // hidden test pages are not counted
   try {
     var s = document.createElement('script');
     s.async = true;

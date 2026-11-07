@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Planet Zoo 2 Zoo Planner (test)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f3efe6; --card: #fffdf8; --ink: #22301f; --muted: #6a7363; --line: #e3dccb;
+    --accent: #3d6a47; --accent-ink: #ffffff; --accent-soft: #e4eedf;
+    --warn: #8f5512; --warn-soft: #f8ecd8; --bad: #a1382a; --bad-soft: #f7e2dc;
+    --thrive: #6b4f8a; --thrive-soft: #ece6f3; --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; line-height: 1.45; }
+  h1, h2, h3 { font-family: "Fraunces", Georgia, serif; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  header.top { padding: 18px 10px 12px; }
+  header.top h1 { font-size: 28px; }
+  header.top p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+  .test-badge { display: inline-block; vertical-align: middle; margin-left: 8px; font-family: "DM Sans", sans-serif; font-size: 12px; font-weight: 700; background: var(--warn-soft); color: var(--warn); border-radius: 999px; padding: 2px 9px; }
+
+  .site-nav { display: flex; gap: 4px; padding: 10px 10px 0; flex-wrap: wrap; border-bottom: 1px solid var(--line); background: var(--card); }
+  .site-nav a { text-decoration: none; color: var(--muted); font-weight: 700; font-size: 15px; padding: 10px 14px; border-radius: 10px 10px 0 0; border: 1px solid transparent; border-bottom: 0; margin-bottom: -1px; }
+  .site-nav a:hover { color: var(--ink); }
+  .site-nav a[aria-current="page"] { color: var(--ink); background: var(--bg); border-color: var(--line); }
+
+  .layout { padding: 0 10px 32px; display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: 18px; align-items: start; }
+  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .side { display: grid; gap: 14px; position: sticky; top: 12px; }
+  @media (max-width: 860px) { .side { position: static; } }
+  .side h2 { font-size: 19px; margin-bottom: 10px; }
+  .field { display: grid; gap: 4px; margin-bottom: 10px; font-size: 14px; }
+  .field > span { font-weight: 500; }
+  .field .hint { color: var(--muted); font-size: 12.5px; font-weight: 400; }
+  select, input[type=text] { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); width: 100%; min-width: 0; }
+  select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row > select, .row > input { flex: 1; }
+  button { font: inherit; cursor: pointer; }
+  button.primary { font-weight: 700; background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 8px; padding: 8px 14px; }
+  button.secondary { font-weight: 500; background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; }
+  button.secondary:hover { border-color: var(--accent); }
+  button.danger:hover { border-color: var(--bad); color: var(--bad); }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
+  .seg label { flex: 1; text-align: center; padding: 7px 6px; cursor: pointer; font-size: 14px; }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg label:has(input:checked) { background: var(--accent); color: #fff; font-weight: 700; }
+  .seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -3px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12.5px; }
+
+  .panel { display: grid; gap: 14px; }
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+  .stat .n { font-family: "Fraunces", Georgia, serif; font-size: 24px; font-weight: 600; }
+  .stat .l { color: var(--muted); font-size: 13px; }
+  .theme-card h2 { font-size: 20px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+  .theme-card h2 .sub { font-family: "DM Sans", sans-serif; font-size: 14px; font-weight: 400; color: var(--muted); }
+  .unit { border-top: 1px solid var(--line); padding: 12px 0 10px; }
+  .unit:first-of-type { margin-top: 10px; }
+  .unit-head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px 12px; flex-wrap: wrap; }
+  .unit-title { font-weight: 700; }
+  .kind { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); margin-right: 6px; vertical-align: 1px; }
+  .kind.exhibit { background: #ece9e1; color: var(--muted); }
+  .kind.aquarium { background: #e1edf3; color: #2f5d72; }
+  .area { font-weight: 700; white-space: nowrap; }
+  .area .muted { font-weight: 400; }
+  .members { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+  .members li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 14px; }
+  .members .mname { flex: 1 1 160px; }
+  .members select { width: auto; max-width: 220px; padding: 4px 6px; font-size: 13px; }
+  .x { background: none; border: 0; color: var(--muted); font-size: 20px; line-height: 1; padding: 0 4px; }
+  .x:hover { color: var(--bad); }
+  .unit-foot { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; margin-top: 6px; font-size: 13px; color: var(--muted); }
+  .unit-foot select { width: auto; padding: 3px 6px; font-size: 13px; }
+  .note { border-radius: 8px; padding: 7px 10px; font-size: 13.5px; margin-top: 6px; }
+  .note.thrive { background: var(--thrive-soft); color: var(--thrive); }
+  .note.bad { background: var(--bad-soft); color: var(--bad); }
+  .note .have { font-weight: 700; }
+  .status { text-align: center; color: var(--muted); padding: 30px 10px; }
+  .empty { color: var(--muted); }
+  .data-warn { margin: 0 10px 12px; }
+  .data-warn details { background: var(--warn-soft); color: var(--warn); border-radius: 10px; padding: 8px 12px; font-size: 13.5px; }
+  .data-warn summary { cursor: pointer; font-weight: 700; }
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(20px); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 50; max-width: calc(100% - 32px); }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  footer { padding: 0 10px 24px; color: var(--muted); font-size: 12.5px; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>window.PZ_NO_COUNT = true; /* test page: not counted */</script>
+<script src="config.js"></script>
+<script src="loader.js"></script>
+<script src="habitat-calc.js"></script>
+</head>
+<body>
+<nav class="site-nav" aria-label="Planet Zoo 2 tools"><a href="index.html">Habitat Planner</a><a href="reserves.html">Reserve Planner</a><a href="zoo-test.html" aria-current="page">Zoo Planner</a></nav>
+
+<header class="top">
+  <h1>Planet Zoo 2 Zoo Planner <span class="test-badge">Test version</span></h1>
+  <p>Add your animals to get a list of habitats and exhibits, sized and sorted into themes. The drawn map comes in a later stage.</p>
+</header>
+
+<div class="data-warn" id="data-warn"></div>
+
+<main class="layout">
+  <div class="side">
+    <section class="card" aria-label="Your zoo plan">
+      <h2>Your zoo plan</h2>
+      <div class="field"><span>Plan</span>
+        <div class="row"><select id="plan-pick" aria-label="Plan"></select><button type="button" class="secondary" id="plan-new">New plan</button></div>
+      </div>
+      <label class="field"><span>Plan name</span><input type="text" id="plan-name" maxlength="60"></label>
+      <div class="row small"><button type="button" class="secondary danger" id="plan-del">Delete this plan</button></div>
+    </section>
+
+    <section class="card" aria-label="Setup">
+      <h2>Setup</h2>
+      <label class="field"><span>Group animals into themes by</span>
+        <select id="set-theme">
+          <option value="continent">Continent</option>
+          <option value="biome">Biome</option>
+          <option value="habitatType">Habitat type (terrestrial, avian, aquatic)</option>
+          <option value="animalType">Animal type</option>
+          <option value="taxonomy">Taxonomy (mammals, birds, reptiles…)</option>
+        </select>
+      </label>
+      <div class="field"><span>Habitat shapes</span>
+        <div class="seg" role="radiogroup" aria-label="Habitat shapes">
+          <label><input type="radio" name="shape" value="grid">Grid</label>
+          <label><input type="radio" name="shape" value="freeform">Freeform</label>
+        </div>
+      </div>
+      <label class="field"><span>Path style</span>
+        <select id="set-paths">
+          <option value="loop">Simple loop</option>
+          <option value="theme-loops">Loop with theme loops</option>
+          <option value="web">Web</option>
+        </select>
+      </label>
+      <label class="field"><span>Entrances</span>
+        <select id="set-entrances">
+          <option value="auto">Suggest for me</option>
+          <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+        </select>
+      </label>
+      <p class="muted small" style="margin:0">Shapes, path style and entrances are saved now and used when the map is drawn.</p>
+    </section>
+
+    <section class="card" aria-label="Add animals">
+      <h2>Add animals</h2>
+      <label class="field"><span>Habitats <span class="hint">(includes aquariums and aviaries)</span></span>
+        <select id="add-habitat"></select>
+      </label>
+      <label class="field"><span>Exhibits</span>
+        <select id="add-exhibit"></select>
+      </label>
+      <p class="muted small" style="margin:0">Habitats are sized for the largest group allowed, with every thrive need met, plus extra space.</p>
+    </section>
+
+    <section class="card" aria-label="Backup">
+      <h2>Backup</h2>
+      <p class="muted small" style="margin:0 0 10px">Your plans are saved in this browser. Download a backup to keep them safe or move them to another device.</p>
+      <div class="row">
+        <button type="button" class="secondary" id="backup-dl">Download backup</button>
+        <button type="button" class="secondary" id="backup-up">Restore from backup</button>
+        <input type="file" id="backup-file" accept=".json,application/json" hidden>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel" id="panel" aria-live="polite">
+    <div class="card status" id="status">Loading animal data…</div>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status"></div>
+<footer>Fan-made planning tool. Not affiliated with Frontier Developments.</footer>
+
+<script>
+(function () {
+  var STORE_KEY = 'pz2-zoo-planner-v1';
+  var MAX_AUTO_SPECIES = 3;          // automatic shared habitats hold 2 to 3 species
+  var CONTINENTS = ['Africa', 'Asia', 'Europe', 'North America', 'South America', 'Oceania'];
+  // Oceans and reefs, for theming by continent: grouped with the nearest continents.
+  var OCEAN_TO_CONTINENTS = {
+    'indo-pacific reefs': ['Asia', 'Oceania'],
+    'western pacific reefs': ['Asia', 'Oceania'],
+    'pacific ocean': ['Asia', 'Oceania', 'North America', 'South America'],
+    'indian ocean': ['Africa', 'Asia', 'Oceania'],
+    'atlantic ocean': ['Europe', 'Africa', 'North America', 'South America'],
+    'worldwide': CONTINENTS
+  };
+  // Biomes that become the Oceans theme when theming by biome.
+  var OCEAN_BIOMES = ['reef', 'open sea'];
+  var VIEW_ORDER = ['small', 'medium', 'large', 'very large'];
+  var THEME_LABEL = { continent: 'continent', biome: 'biome', habitatType: 'habitat type', animalType: 'animal type', taxonomy: 'taxonomy' };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var model = null, extra = {}, settings = {}, exhibitAnimals = [];
+  var state = null, storageOk = true;
+  var calcCache = {};
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function fmt(n) { return (Math.round(n)).toLocaleString('en-US'); }
+  function uid() { return Math.random().toString(36).slice(2, 10); }
+  function norm(s) { return PZ.norm(s); }
+  function toast(msg) {
+    var t = $('toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toast.t); toast.t = setTimeout(function () { t.classList.remove('show'); }, 3500);
+  }
+
+  // ---------- settings (Layout Settings tab) ----------
+  var DEFAULTS = {
+    'map size (m)': 1000, 'extra space (%)': 25, 'path width (m)': 8, 'map share per suggested entrance (%)': 25,
+    'bad view distance: small (m)': 24, 'bad view distance: medium (m)': 28, 'bad view distance: large (m)': 36, 'bad view distance: very large (m)': 48
+  };
+  function setting(name) {
+    var k = norm(name);
+    if (settings[k] !== undefined && settings[k] !== null) return settings[k];
+    return DEFAULTS[k] !== undefined ? DEFAULTS[k] : null;
+  }
+  function readSettings(data, warnings) {
+    var t = PZ.table(data, 'Layout Settings');
+    if (!t.header.length) return; // missing tab is already noted; standard values are used
+    t.rows.forEach(function (r) {
+      var name = t.get(r, 'Setting');
+      if (PZ.blank(name)) return;
+      settings[norm(name)] = PZ.num(t.get(r, 'Value'));
+    });
+  }
+
+  // ---------- extra Info columns used only by the Zoo Planner ----------
+  function readExtra(data, warnings) {
+    var info = PZ.table(data, 'Info');
+    ['Animal Type', 'Habitat Type', 'Taxonomy', 'Guest View Size'].forEach(function (h) {
+      if (info.header.length && !info.has(h)) warnings.push('Heading "' + h + '" was not found on the Info tab.');
+    });
+    info.rows.forEach(function (r) {
+      var name = info.get(r, 'Animal');
+      if (PZ.blank(name)) return;
+      extra[norm(name)] = {
+        animalType: PZ.list(info.get(r, 'Animal Type')),
+        habitatType: PZ.list(info.get(r, 'Habitat Type')),
+        taxonomy: PZ.list(info.get(r, 'Taxonomy')),
+        view: PZ.blank(info.get(r, 'Guest View Size')) ? null : String(info.get(r, 'Guest View Size')).trim()
+      };
+    });
+  }
+
+  // ---------- COMPATIBILITY (future) ----------
+  // Lisa will add compatibility research later (for example on a Compatibility tab).
+  // When it exists, read it here and return false for species that must not share.
+  // Until then every pair that the Habitat Planner's own rules allow can share.
+  function extraCompatible(keys) { return true; }
+
+  // ---------- saving ----------
+  function newPlan(name) {
+    return { id: uid(), name: name, setup: { theme: 'continent', shape: 'grid', paths: 'theme-loops', entrances: 'auto' }, habitats: [], exhibits: [] };
+  }
+  function load() {
+    var s = null;
+    try { var raw = window.localStorage.getItem(STORE_KEY); if (raw) s = JSON.parse(raw); } catch (e) { storageOk = false; }
+    if (!valid(s)) { var p = newPlan('My zoo'); s = { version: 1, current: p.id, plans: [p] }; }
+    return s;
+  }
+  function valid(s) { return s && s.version === 1 && Array.isArray(s.plans) && s.plans.length > 0; }
+  function save() {
+    try { window.localStorage.setItem(STORE_KEY, JSON.stringify(state)); storageOk = true; } catch (e) { storageOk = false; }
+  }
+  function plan() {
+    var p = state.plans.filter(function (x) { return x.id === state.current; })[0];
+    if (!p) { p = state.plans[0]; state.current = p.id; }
+    return p;
+  }
+
+  // ---------- habitat maths ----------
+  function largestGroup(a) {
+    var g = a.grp, c = [g.mixMax, g.mMax, g.fMax].filter(function (v) { return v !== null; });
+    if (c.length) return Math.max.apply(null, c);
+    c = [g.mixMin, g.mMin, g.fMin].filter(function (v) { return v !== null; });
+    return c.length ? Math.max.apply(null, c) : 1;
+  }
+  function memberCount(m) { return m.n ? m.n : largestGroup(model.animals[m.key]); }
+  function selectionFor(m) {
+    var a = model.animals[m.key], n = memberCount(m);
+    return a.collective ? { key: m.key, count: n, thrive: true } : { key: m.key, males: Math.ceil(n / 2), females: Math.floor(n / 2), thrive: true };
+  }
+  function calc(members) {
+    var sig = members.map(function (m) { return m.key + ':' + memberCount(m); }).sort().join('|');
+    if (calcCache[sig]) return calcCache[sig];
+    var res = PZ.calculate(model, members.map(selectionFor), null);
+    var problems = [];
+    res.alerts.forEach(function (al) { if (al.level === 'bad') problems.push(al.who + ': ' + al.text); });
+    if (res.types && res.types.noMatch) problems.push('No enclosure type suits all of them (some need an aquarium, some a habitat).');
+    if (res.temp && res.temp.noMatch) problems.push('No temperature suits all of them.');
+    if (res.plants && res.plants.noMatch) problems.push('No plant coverage suits all of them.');
+    if (res.salinity && res.salinity.noMatch) problems.push('No water salinity suits all of them.');
+    if (res.terrain && res.terrain.noMatch) problems.push('Their terrain needs can’t all fit together.');
+    var out = { base: res.space ? res.space.minSize : 0, aquarium: !!res.aquariumOnly, problems: problems };
+    calcCache[sig] = out;
+    return out;
+  }
+  function keysOf(members) { var seen = {}, out = []; members.forEach(function (m) { if (!seen[m.key]) { seen[m.key] = 1; out.push(m.key); } }); return out; }
+  function compatible(members) {
+    return calc(members).problems.length === 0 && extraCompatible(keysOf(members));
+  }
+  function habitatInfo(h) {
+    var c = calc(h.members);
+    var base = h.imported && h.imported.size ? h.imported.size : c.base;
+    var pct = setting('Extra Space (%)') || 0;
+    return { base: base, area: base * (1 + pct / 100), aquarium: c.aquarium, problems: c.problems };
+  }
+
+  // Thrive needs that depend on other species (social groups or a named species).
+  function unmetNeeds(members) {
+    var keys = keysOf(members), out = [];
+    keys.forEach(function (k) {
+      var a = model.animals[k];
+      PZ.thriveReqsFor(model, a).forEach(function (r) {
+        if (r.cls.type === 'group') {
+          var g = model.groups[r.cls.group];
+          var met = keys.some(function (o) { return o !== k && g.members[o]; });
+          if (!met) out.push({ who: k, type: 'group', group: r.cls.group, name: g.name,
+            options: Object.keys(g.members).filter(function (m) { return m !== k; }) });
+        } else if (r.cls.type === 'species') {
+          if (r.cls.species === k) return;
+          if (keys.indexOf(r.cls.species) < 0) out.push({ who: k, type: 'species', species: r.cls.species, options: [r.cls.species] });
+        }
+      });
+    });
+    return out;
+  }
+  function meets(need, members) {
+    return keysOf(members).some(function (k) { return k !== need.who && need.options.indexOf(k) >= 0; });
+  }
+
+  // Automatic shared habitats: join habitats so social-group animals can thrive.
+  function autoPair() {
+    var p = plan(), guard = 0, changed = true;
+    while (changed && guard++ < 60) {
+      changed = false;
+      var pool = p.habitats.filter(function (h) { return !h.manual && !h.imported; });
+      for (var i = 0; i < pool.length && !changed; i++) {
+        var H = pool[i], needs = unmetNeeds(H.members);
+        if (!needs.length) continue;
+        var best = null;
+        pool.forEach(function (C) {
+          if (C === H) return;
+          var merged = H.members.concat(C.members);
+          if (keysOf(merged).length > MAX_AUTO_SPECIES) return;
+          if (!needs.some(function (n) { return meets(n, C.members); })) return;
+          if (!compatible(merged)) return;
+          var helpsBack = unmetNeeds(C.members).some(function (n) { return meets(n, H.members); });
+          var score = (helpsBack ? 10 : 0) - keysOf(merged).length;
+          if (!best || score > best.score) best = { C: C, score: score };
+        });
+        if (best) {
+          H.members = H.members.concat(best.C.members);
+          p.habitats.splice(p.habitats.indexOf(best.C), 1);
+          changed = true;
+        }
+      }
+    }
+  }
+
+  // ---------- themes ----------
+  function candidates(key, type) {
+    var a = model.animals[key], x = extra[key] || {}, out = [];
+    if (type === 'continent') {
+      a.ranges.forEach(function (r) {
+        var hit = CONTINENTS.filter(function (c) { return norm(c) === norm(r); })[0];
+        if (hit) out.push(hit); else if (OCEAN_TO_CONTINENTS[norm(r)]) out = out.concat(OCEAN_TO_CONTINENTS[norm(r)]);
+        else out.push(r);
+      });
+    } else if (type === 'biome') {
+      a.biomes.forEach(function (b) { out.push(OCEAN_BIOMES.indexOf(norm(b)) >= 0 ? 'Oceans' : b); });
+    } else {
+      out = (x[type] || []).slice();
+    }
+    var seen = {}, res = [];
+    out.forEach(function (v) { if (!seen[norm(v)]) { seen[norm(v)] = 1; res.push(v); } });
+    return res.length ? res : ['Not sorted yet'];
+  }
+  function viewRank(key) { var v = (extra[key] || {}).view; return v ? VIEW_ORDER.indexOf(norm(v)) : -1; }
+  function unitCandidates(keys, type) {
+    var count = {}, pretty = {};
+    keys.forEach(function (k) { candidates(k, type).forEach(function (c) { count[norm(c)] = (count[norm(c)] || 0) + 1; pretty[norm(c)] = c; }); });
+    var max = Math.max.apply(null, Object.keys(count).map(function (c) { return count[c]; }));
+    var top = Object.keys(count).filter(function (c) { return count[c] === max; });
+    if (top.length > 1 && keys.length > 1) {
+      // tie: go with the largest animal's themes
+      var big = keys.slice().sort(function (x, y) { return viewRank(y) - viewRank(x) || largestGroup(model.animals[y]) - largestGroup(model.animals[x]); })[0];
+      var bigC = candidates(big, type).map(norm);
+      var narrowed = top.filter(function (c) { return bigC.indexOf(c) >= 0; });
+      if (narrowed.length) top = narrowed;
+    }
+    return top.map(function (c) { return pretty[c]; });
+  }
+  function assignThemes(units, type) {
+    var total = {};
+    function add(u, t) { u.themeNow = t; total[t] = (total[t] || 0) + u.area; }
+    var flexible = [];
+    units.forEach(function (u) {
+      if (u.override && u.cands.indexOf(u.override) < 0) u.cands = u.cands.concat([u.override]);
+      if (u.override) add(u, u.override);
+      else if (u.cands.length === 1) add(u, u.cands[0]);
+      else flexible.push(u);
+    });
+    flexible.sort(function (x, y) { return y.area - x.area; }).forEach(function (u) {
+      var pick = u.cands.slice().sort(function (x, y) { return (total[x] || 0) - (total[y] || 0) || x.localeCompare(y); })[0];
+      add(u, pick);
+    });
+  }
+
+  // ---------- build the list ----------
+  function buildUnits() {
+    var p = plan(), type = p.setup.theme, units = [];
+    var exW = setting('Exhibit Width (m)'), exD = setting('Exhibit Depth (m)');
+    var wkW = setting('Walkthrough Exhibit Width (m)'), wkD = setting('Walkthrough Exhibit Depth (m)');
+    p.habitats.forEach(function (h, i) {
+      var inf = habitatInfo(h), keys = keysOf(h.members);
+      var themeOv = h.theme && h.theme[type];
+      units.push({ kind: 'habitat', h: h, num: i + 1, keys: keys, area: inf.area, base: inf.base, aquarium: inf.aquarium,
+        problems: inf.problems, needs: unmetNeeds(h.members), cands: unitCandidates(keys, type), override: themeOv || null });
+    });
+    p.exhibits.forEach(function (e) {
+      var a = model.animals[e.key];
+      var walk = a.types.some(function (t) { return /walkthrough/i.test(t); });
+      var w = walk ? wkW : exW, d = walk ? wkD : exD;
+      units.push({ kind: 'exhibit', e: e, keys: [e.key], walk: walk, w: w, d: d, area: (w && d) ? w * d : 0,
+        cands: unitCandidates([e.key], type), override: (e.theme && e.theme[type]) || null });
+    });
+    assignThemes(units, type);
+    return units;
+  }
+
+  function nameOf(k) { return model.animals[k] ? model.animals[k].name : k; }
+  function habitatLabel(h, num) { return (calc(h.members).aquarium ? 'Aquarium ' : 'Habitat ') + num + ' (' + keysOf(h.members).map(nameOf).join(', ') + ')'; }
+
+  function render() {
+    var p = plan();
+    renderPlanBar();
+    var units = buildUnits();
+    var panel = $('panel'), html = '';
+    if (!storageOk) html += '<div class="card note bad">This browser isn’t letting the page save. Download a backup before closing the page.</div>';
+    if (!units.length) {
+      panel.innerHTML = html + '<div class="card status">No animals in this plan yet. Use <strong>Add animals</strong> to start.</div>';
+      return;
+    }
+    var hab = units.filter(function (u) { return u.kind === 'habitat'; }), exh = units.filter(function (u) { return u.kind === 'exhibit'; });
+    var totalArea = units.reduce(function (s, u) { return s + u.area; }, 0);
+    var map = setting('Map Size (m)') || 1000, mapArea = map * map;
+    var themes = {};
+    units.forEach(function (u) { (themes[u.themeNow] = themes[u.themeNow] || []).push(u); });
+    var themeNames = Object.keys(themes).sort(function (x, y) { return x === 'Not sorted yet' ? 1 : y === 'Not sorted yet' ? -1 : x.localeCompare(y); });
+    var unmetCount = hab.filter(function (u) { return u.needs.length; }).length;
+
+    html += '<div class="summary">' +
+      stat(hab.length, hab.length === 1 ? 'habitat' : 'habitats') +
+      stat(exh.length, exh.length === 1 ? 'exhibit' : 'exhibits') +
+      stat(themeNames.length, themeNames.length === 1 ? 'theme area' : 'theme areas') +
+      stat(fmt(totalArea) + ' m²', 'for enclosures (' + (Math.round(totalArea / mapArea * 1000) / 10) + '% of the map, before paths and plazas)') +
+      '</div>';
+    if (unmetCount) html += '<div class="card note thrive">' + unmetCount + ' habitat' + (unmetCount === 1 ? ' has an animal' : 's have animals') + ' that can’t thrive yet because a social partner is missing. See the purple notes below.</div>';
+
+    themeNames.forEach(function (t) {
+      var list = themes[t], area = list.reduce(function (s, u) { return s + u.area; }, 0);
+      html += '<section class="card theme-card"><h2>' + esc(t) + ' <span class="sub">' + list.length + (list.length === 1 ? ' enclosure' : ' enclosures') + ' · ' + fmt(area) + ' m²</span></h2>';
+      list.sort(function (x, y) { return (x.kind === y.kind ? 0 : x.kind === 'habitat' ? -1 : 1) || y.area - x.area; })
+        .forEach(function (u) { html += u.kind === 'habitat' ? habitatHtml(u, hab) : exhibitHtml(u); });
+      html += '</section>';
+    });
+    panel.innerHTML = html;
+  }
+  function stat(n, l) { return '<div class="stat"><div class="n">' + n + '</div><div class="l">' + esc(l) + '</div></div>'; }
+
+  function themeSelect(u, attr, id) {
+    var type = plan().setup.theme, opts = u.cands.slice();
+    var all = allThemeValues(type);
+    var html = '<label>Theme: <select data-action="theme" data-' + attr + '="' + id + '"><option value="">' +
+      (u.override ? 'Automatic' : 'Automatic (' + esc(u.themeNow) + ')') + '</option>';
+    all.forEach(function (t) { html += '<option value="' + esc(t) + '"' + (u.override === t ? ' selected' : '') + '>' + esc(t) + '</option>'; });
+    return html + '</select></label>';
+  }
+  var themeValuesCache = {};
+  function allThemeValues(type) {
+    if (themeValuesCache[type]) return themeValuesCache[type];
+    var seen = {}, out = [];
+    Object.keys(model.animals).forEach(function (k) { candidates(k, type).forEach(function (c) { if (!seen[norm(c)]) { seen[norm(c)] = 1; out.push(c); } }); });
+    return (themeValuesCache[type] = out.sort());
+  }
+
+  function habitatHtml(u, allHab) {
+    var h = u.h, keys = u.keys;
+    var view = keys.map(function (k) { return (extra[k] || {}).view; }).filter(Boolean)
+      .sort(function (x, y) { return VIEW_ORDER.indexOf(norm(y)) - VIEW_ORDER.indexOf(norm(x)); })[0];
+    var viewDist = view ? setting('Bad View Distance: ' + view + ' (m)') : null;
+    var html = '<div class="unit"><div class="unit-head"><span class="unit-title">' + (u.aquarium ? 'Aquarium ' : 'Habitat ') + u.num + '</span>' +
+      '<span class="area">' + fmt(u.area) + ' m² <span class="muted small">(' + fmt(u.base) + ' + ' + (setting('Extra Space (%)') || 0) + '%)</span></span></div>';
+    html += '<ul class="members">';
+    h.members.forEach(function (m, idx) {
+      var a = model.animals[m.key];
+      var moveOpts = '<option value="">Move to…</option>';
+      allHab.forEach(function (o) { if (o.h !== h) moveOpts += '<option value="' + o.h.id + '">' + esc(habitatLabel(o.h, o.num)) + '</option>'; });
+      if (h.members.length > 1) moveOpts += '<option value="__new">Its own habitat</option>';
+      html += '<li><span class="mname"><strong>' + esc(a.name) + '</strong> <span class="muted">· ' +
+        (m.n ? m.n : 'up to ' + memberCount(m)) + ' ' + (a.collective ? (memberCount(m) === 1 ? 'collective' : 'collectives') : 'animals') + '</span></span>' +
+        (allHab.length > 1 || h.members.length > 1 ? '<select data-action="move" data-h="' + h.id + '" data-i="' + idx + '" aria-label="Move ' + esc(a.name) + '">' + moveOpts + '</select>' : '') +
+        '<button type="button" class="x" data-action="remove-member" data-h="' + h.id + '" data-i="' + idx + '" aria-label="Remove ' + esc(a.name) + '">×</button></li>';
+    });
+    html += '</ul>';
+    html += '<div class="unit-foot">' + themeSelect(u, 'h', h.id) +
+      (view ? '<span>Guest view: ' + esc(view) + (viewDist ? ', keep every part within ' + viewDist + ' m of a path' : '') + '</span>' : '') + '</div>';
+    if (u.problems.length) html += '<div class="note bad"><strong>These animals can’t share a habitat:</strong> ' + u.problems.map(esc).join(' ') + '</div>';
+    u.needs.forEach(function (n) {
+      var inPlan = {};
+      plan().habitats.forEach(function (o) { keysOf(o.members).forEach(function (k) { inPlan[k] = 1; }); });
+      var opts = n.options.map(function (k) { return inPlan[k] ? '<span class="have">' + esc(nameOf(k)) + ' (in your plan)</span>' : esc(nameOf(k)); });
+      html += '<div class="note thrive">To thrive, ' + esc(nameOf(n.who)) + ' needs ' + (n.type === 'group' ? 'one of these in its habitat' : 'this animal in its habitat') + ': ' + opts.join(', ') + '.</div>';
+    });
+    return html + '</div>';
+  }
+  function exhibitHtml(u) {
+    var e = u.e, a = model.animals[e.key];
+    var size = (u.w && u.d) ? u.w + ' × ' + u.d + ' m' : 'size not set yet';
+    return '<div class="unit"><div class="unit-head"><span class="unit-title"><span class="kind exhibit">' + (u.walk ? 'Walkthrough' : 'Exhibit') + '</span>' + esc(a.name) + '</span>' +
+      '<span class="area">' + (u.area ? fmt(u.area) + ' m² ' : '') + '<span class="muted small">(' + size + ')</span>' +
+      ' <button type="button" class="x" data-action="remove-exhibit" data-e="' + e.id + '" aria-label="Remove ' + esc(a.name) + '">×</button></span></div>' +
+      '<div class="unit-foot">' + themeSelect(u, 'e', e.id) + '</div></div>';
+  }
+
+  // ---------- side panel ----------
+  function renderPlanBar() {
+    var p = plan();
+    $('plan-pick').innerHTML = state.plans.map(function (x) { return '<option value="' + x.id + '"' + (x.id === p.id ? ' selected' : '') + '>' + esc(x.name || 'Untitled plan') + '</option>'; }).join('');
+    var nameBox = $('plan-name');
+    if (document.activeElement !== nameBox || nameBox.getAttribute('data-plan') !== p.id) { nameBox.value = p.name; nameBox.setAttribute('data-plan', p.id); }
+    $('set-theme').value = p.setup.theme;
+    $('set-paths').value = p.setup.paths;
+    $('set-entrances').value = String(p.setup.entrances);
+    Array.prototype.forEach.call(document.querySelectorAll('input[name=shape]'), function (r) { r.checked = r.value === p.setup.shape; });
+    $('plan-del').disabled = state.plans.length < 2;
+  }
+  function fillAddLists() {
+    var hab = model.pickable;
+    $('add-habitat').innerHTML = '<option value="">Add an animal to a habitat…</option>' + hab.map(function (a) { return '<option value="' + esc(a.key) + '">' + esc(a.name) + '</option>'; }).join('');
+    $('add-exhibit').innerHTML = '<option value="">Add an exhibit animal…</option>' + exhibitAnimals.map(function (a) { return '<option value="' + esc(a.key) + '">' + esc(a.name) + '</option>'; }).join('');
+  }
+
+  // ---------- actions ----------
+  function findHabitat(id) { return plan().habitats.filter(function (h) { return h.id === id; })[0]; }
+  function changed() { save(); render(); }
+
+  function wire() {
+    $('plan-pick').addEventListener('change', function () { state.current = this.value; changed(); });
+    $('plan-new').addEventListener('click', function () {
+      var p = newPlan('Zoo plan ' + (state.plans.length + 1));
+      state.plans.push(p); state.current = p.id; changed();
+      $('plan-name').focus(); $('plan-name').select();
+    });
+    $('plan-name').addEventListener('input', function () { plan().name = this.value; save(); renderPlanBar(); });
+    $('plan-name').addEventListener('blur', function () { if (!plan().name.trim()) { plan().name = 'Untitled plan'; changed(); } });
+    $('plan-del').addEventListener('click', function () {
+      if (state.plans.length < 2) return;
+      if (!window.confirm('Delete the plan "' + plan().name + '"? This can’t be undone.')) return;
+      state.plans = state.plans.filter(function (x) { return x.id !== state.current; });
+      state.current = state.plans[0].id; changed();
+    });
+    $('set-theme').addEventListener('change', function () { plan().setup.theme = this.value; changed(); });
+    $('set-paths').addEventListener('change', function () { plan().setup.paths = this.value; changed(); });
+    $('set-entrances').addEventListener('change', function () { plan().setup.entrances = this.value === 'auto' ? 'auto' : Number(this.value); changed(); });
+    Array.prototype.forEach.call(document.querySelectorAll('input[name=shape]'), function (r) {
+      r.addEventListener('change', function () { if (this.checked) { plan().setup.shape = this.value; changed(); } });
+    });
+
+    $('add-habitat').addEventListener('change', function () {
+      var k = this.value; if (!k) return;
+      plan().habitats.push({ id: uid(), members: [{ key: k, n: null }], manual: false, imported: null, theme: {} });
+      autoPair();
+      this.value = '';
+      changed();
+      var h = plan().habitats.filter(function (x) { return x.members.some(function (m) { return m.key === k; }); }).pop();
+      toast(nameOf(k) + (h && h.members.length > 1 ? ' added, sharing with ' + keysOf(h.members).filter(function (x) { return x !== k; }).map(nameOf).join(', ') : ' added'));
+    });
+    $('add-exhibit').addEventListener('change', function () {
+      var k = this.value; if (!k) return;
+      plan().exhibits.push({ id: uid(), key: k, theme: {} });
+      this.value = '';
+      changed();
+      toast(nameOf(k) + ' exhibit added');
+    });
+
+    $('panel').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-action]'); if (!b) return;
+      var act = b.getAttribute('data-action'), p = plan();
+      if (act === 'remove-member') {
+        var h = findHabitat(b.getAttribute('data-h')), i = Number(b.getAttribute('data-i'));
+        h.members.splice(i, 1);
+        if (!h.members.length) p.habitats.splice(p.habitats.indexOf(h), 1);
+        changed();
+      } else if (act === 'remove-exhibit') {
+        p.exhibits = p.exhibits.filter(function (x) { return x.id !== b.getAttribute('data-e'); });
+        changed();
+      }
+    });
+    $('panel').addEventListener('change', function (e) {
+      var s = e.target, act = s.getAttribute('data-action'), p = plan(), type = p.setup.theme;
+      if (act === 'theme') {
+        var target = s.getAttribute('data-h') ? findHabitat(s.getAttribute('data-h')) : p.exhibits.filter(function (x) { return x.id === s.getAttribute('data-e'); })[0];
+        target.theme = target.theme || {};
+        if (s.value) target.theme[type] = s.value; else delete target.theme[type];
+        changed();
+      } else if (act === 'move' && s.value) {
+        var from = findHabitat(s.getAttribute('data-h')), i = Number(s.getAttribute('data-i'));
+        var m = from.members.splice(i, 1)[0];
+        if (s.value === '__new') {
+          p.habitats.splice(p.habitats.indexOf(from) + 1, 0, { id: uid(), members: [m], manual: true, imported: null, theme: {} });
+        } else {
+          var to = findHabitat(s.value); to.members.push(m); to.manual = true;
+        }
+        from.manual = true;
+        if (!from.members.length) p.habitats.splice(p.habitats.indexOf(from), 1);
+        changed();
+        toast(nameOf(m.key) + ' moved');
+      }
+    });
+
+    $('backup-dl').addEventListener('click', function () {
+      var blob = new Blob([JSON.stringify({ app: 'pz2-zoo-planner', saved: new Date().toISOString(), data: state }, null, 1)], { type: 'application/json' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'zoo-planner-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+    });
+    $('backup-up').addEventListener('click', function () { $('backup-file').click(); });
+    $('backup-file').addEventListener('change', function () {
+      var f = this.files && this.files[0]; if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        try {
+          var j = JSON.parse(rd.result), s = j && j.app === 'pz2-zoo-planner' ? j.data : j;
+          if (!valid(s)) throw new Error('bad');
+          s.plans.forEach(function (p) { p.habitats = (p.habitats || []).filter(function (h) { h.members = (h.members || []).filter(function (m) { return model.animals[m.key]; }); return h.members.length; }); p.exhibits = (p.exhibits || []).filter(function (x) { return model.animals[x.key]; }); });
+          if (!window.confirm('Replace the plans in this browser with the ' + s.plans.length + ' plan' + (s.plans.length === 1 ? '' : 's') + ' in this backup?')) return;
+          state = s; changed(); toast('Backup restored');
+        } catch (e) { window.alert('That file isn’t a Zoo Planner backup.'); }
+      };
+      rd.readAsText(f);
+      this.value = '';
+    });
+  }
+
+  // ---------- start ----------
+  function start(data) {
+    var warnings = [];
+    model = PZ.buildModel(data);
+    readSettings(data, warnings);
+    readExtra(data, warnings);
+    exhibitAnimals = Object.keys(model.animals).map(function (k) { return model.animals[k]; })
+      .filter(function (a) { return a.done && a.types.some(function (t) { return /exhibit|cylinder/i.test(t); }); })
+      .sort(function (x, y) { return x.name.localeCompare(y.name); });
+    warnings = warnings.concat(model.warnings);
+    if (warnings.length) $('data-warn').innerHTML = '<details><summary>Spreadsheet notes (' + warnings.length + ')</summary><ul>' +
+      warnings.map(function (w) { return '<li>' + esc(w) + '</li>'; }).join('') + '</ul></details>';
+    state = load();
+    // drop animals that are no longer in the spreadsheet
+    state.plans.forEach(function (p) {
+      p.habitats = p.habitats.filter(function (h) { h.members = h.members.filter(function (m) { return model.animals[m.key]; }); return h.members.length; });
+      p.exhibits = p.exhibits.filter(function (x) { return model.animals[x.key]; });
+    });
+    fillAddLists();
+    wire();
+    render();
+  }
+  function fail(msg) { $('panel').innerHTML = '<div class="card status">' + esc(msg) + ' Please try refreshing the page.</div>'; }
+
+  if (!window.PZ_LOAD || !window.PZ) return fail('The animal data couldn’t be loaded.');
+  PZ_LOAD('habitat', ['Info', 'Basic Needs', 'Basic Items', 'Thrive Items', 'Terrain', 'Social Groups', 'Tooltips', 'Layout Settings'])
+    .then(start, function () { fail('The animal data couldn’t be loaded.'); });
+})();
+</script>
+</body>
+</html>

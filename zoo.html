@@ -103,7 +103,12 @@
   .map-tools { margin-left: auto; display: inline-flex; gap: 6px; }
   .secondary.icon { font-size: 18px; line-height: 1; padding: 6px 11px; }
   .secondary:disabled { opacity: .4; cursor: default; }
-  .map-wrap { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #f7f3ea; }
+  .map-wrap { position: relative; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #f7f3ea; }
+  .zoo-map { touch-action: none; }
+  .zoom-ctl { position: absolute; bottom: 8px; right: 8px; display: grid; gap: 4px; }
+  .zoom-ctl button { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-size: 19px; line-height: 1; font-weight: 700; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .zoom-ctl button:hover { border-color: var(--accent); }
+  .zoo-map.panning { cursor: grabbing; }
   .zoo-map { user-select: none; -webkit-user-select: none; display: block; width: 100%; height: auto; max-height: 75vh; font-family: "DM Sans", system-ui, sans-serif; }
   .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 13px; }
   .legend .lg { display: inline-flex; align-items: center; gap: 6px; }
@@ -130,8 +135,13 @@
   .ride-help { margin: 0; }
   .ride .note { margin-top: 0; }
   .zoo-map .trk { cursor: pointer; }
+  .zoo-map .grip { cursor: move; }
+  .ride.hidden-ride .ride-head b { color: var(--muted); }
   .shape-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 10px; font-size: 14px; }
   .shape-bar .ride-btns { margin-left: auto; }
+  .river-w { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; }
+  .river-w input { width: 58px; font: inherit; font-weight: 700; text-align: right; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
+  .unit-water { margin-top: 6px; color: #2f6680; }
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(20px); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 50; max-width: calc(100% - 32px); }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   footer { padding: 0 10px 24px; color: var(--muted); font-size: 12.5px; }
@@ -195,7 +205,7 @@
       <label class="field"><span>Add to the map</span>
         <select id="add-facility"><option value="">Add a staff area, plaza or ride station…</option><option value="staff">Staff area</option><option value="plaza">Guest plaza</option></select>
       </label>
-      <p class="muted small" style="margin:0">Drag anything on the map to move it; the paths follow. Tap a habitat to change its shape. Tap a staff area, plaza or ride station to remove it. Habitats are sized for each animal's group size, with every thrive need met, plus extra space. Leave a group size blank to use the largest group allowed automatically (shown in grey).</p>
+      <p class="muted small" style="margin:0">Drag anything on the map to move it; the paths follow. Tap a habitat or water to change its shape. Tap a staff area, plaza or ride station to remove it. Habitats are sized for each animal's group size, with every thrive need met, plus extra space. Leave a group size blank to use the largest group allowed automatically (shown in grey).</p>
     </section>
 
     <section class="card" aria-label="Backup">
@@ -337,7 +347,7 @@
     if (res.plants && res.plants.noMatch) problems.push('No plant coverage suits all of them.');
     if (res.salinity && res.salinity.noMatch) problems.push('No water salinity suits all of them.');
     if (res.terrain && res.terrain.noMatch) problems.push('Their terrain needs can’t all fit together.');
-    var out = { base: res.space ? res.space.minSize : 0, aquarium: !!res.aquariumOnly, problems: problems };
+    var out = { base: res.space ? res.space.minSize : 0, water: res.space && res.space.water ? res.space.water.v || 0 : 0, deep: res.space && res.space.deep ? res.space.deep.v || 0 : 0, aquarium: !!res.aquariumOnly, problems: problems };
     calcCache[sig] = out;
     return out;
   }
@@ -348,9 +358,11 @@
   function habitatInfo(h) {
     var c = calc(h.members);
     var base = h.imported && h.imported.size ? h.imported.size : c.base;
-    var pct = setting('Extra Space (%)') || 0, area = base * (1 + pct / 100);
+    var pct = setting('Extra Space (%)') || 0, water = c.aquarium ? 0 : Math.min(c.water || 0, base);
+    // the extra space goes to land only; water is exactly what the animals need
+    var area = (base - water) * (1 + pct / 100) + water;
     if (h.size) area = Math.max(h.size, base); // the player's own size, never below the minimum
-    return { base: base, area: area, aquarium: c.aquarium, problems: c.problems };
+    return { base: base, area: area, water: water, deep: c.aquarium ? 0 : Math.min(c.deep || 0, water), aquarium: c.aquarium, problems: c.problems };
   }
 
   // Thrive needs that depend on other species (social groups or a named species).
@@ -462,7 +474,7 @@
     p.habitats.forEach(function (h, i) {
       var inf = habitatInfo(h), keys = keysOf(h.members);
       var themeOv = h.theme && h.theme[type];
-      units.push({ kind: 'habitat', h: h, num: i + 1, keys: keys, area: inf.area, base: inf.base, aquarium: inf.aquarium,
+      units.push({ kind: 'habitat', h: h, num: i + 1, keys: keys, area: inf.area, base: inf.base, water: inf.water, deep: inf.deep, aquarium: inf.aquarium,
         problems: inf.problems, needs: unmetNeeds(h.members), cands: unitCandidates(keys, type), override: themeOv || null });
     });
     var walkNum = 0;
@@ -551,10 +563,22 @@
       byTheme[t].push({ type: 'exhibits', A: side * side, bw: side * 1.3, bd: side / 1.3, theme: t, seed: 'x' + t, count: list.length,
         label: 'Exhibits', short: 'E', title: 'Exhibits: ' + list.map(function (u) { return nameOf(u.e.key); }).join(', ') });
     });
-    Object.keys(byTheme).forEach(function (t) { byTheme[t].forEach(function (it) { it.r = it.bw ? Math.hypot(it.bw, it.bd) / 2 : Math.sqrt(it.A / Math.PI); }); });
+    Object.keys(byTheme).forEach(function (t) { byTheme[t].forEach(function (it) { it.r = itemR(it); }); });
     return byTheme;
   }
 
+  // How far an item reaches from its centre. Habitats are drawn as soft wobbly shapes, so they
+  // reach to the furthest point of that shape (r0 is the plain circle of the same area).
+  function itemR(it) {
+    if (it.bw) return Math.hypot(it.bw, it.bd) / 2;
+    var r0 = Math.sqrt(it.A / Math.PI);
+    it.r0 = r0;
+    if (it.type !== 'habitat' && it.type !== 'aquarium') return r0;
+    return blobMaxR(it.seed, r0);
+  }
+  function blobMaxR(seed, r0) {
+    return Math.max.apply(null, outlineSamples(defaultShape(seed, r0), 6).map(function (q) { return Math.hypot(q.x, q.y); })) * 1.01;
+  }
   // Pack each theme into a cluster, then pack the clusters together.
   function packAll(byTheme, themeNames, S, more, variant) {
     var gap = (S.P + 4) / 2, all = [], clusters = [], vr = rand(seedOf('v' + (variant || 0)));
@@ -570,7 +594,7 @@
         var at = seq.map(function (it) { return it.seed; }).indexOf(after);
         seq.splice(at >= 0 ? at + 1 : Math.min(seq.length, 2), 0, { type: 'staff', A: S.staffW * S.staffD, theme: t, seed: 's' + t + s, label: 'Staff', short: 'S', title: 'Staff area (keeper huts and other staff buildings)' });
       });
-      var circles = seq.map(function (it) { it.r = it.bw ? Math.hypot(it.bw, it.bd) / 2 : Math.sqrt(it.A / Math.PI); it.theme = t; return { r: it.r + gap, it: it }; });
+      var circles = seq.map(function (it) { it.r = itemR(it); it.theme = t; return { r: it.r + gap, it: it }; });
       d3.packSiblings(circles);
       var enc = d3.packEnclose(circles);
       clusters.push({ theme: t, ti: ti, circles: circles, r: enc.r + 4, cx: enc.x, cy: enc.y });
@@ -651,8 +675,10 @@
       var i = T[e], j = T[e % 3 === 2 ? e - 2 : e + 1], ci = circles[i], cj = circles[j];
       if (ci.ghost && cj.ghost) continue;
       if ((ci.owner || cj.owner) && own(i) === own(j)) continue; // never through the middle of a stretched habitat
+      if ((ci.type === 'station' || cj.type === 'station') && !ci.ghost && !cj.ghost && Math.hypot(ci.x - cj.x, ci.y - cj.y) - ci.r - cj.r < S.P * 1.2) continue; // no squeezing a path past a ride station
       // the path must squeeze between the two enclosures, not through them
       if (segDist(n1.x, n1.y, n2.x, n2.y, ci.x, ci.y) < ci.r * 0.9 || segDist(n1.x, n1.y, n2.x, n2.y, cj.x, cj.y) < cj.r * 0.9) continue;
+      if (circles.some(function (o) { return !o.ghost && o !== ci && o !== cj && segDist(n1.x, n1.y, n2.x, n2.y, o.x, o.y) < o.r * 0.9; })) continue; // nor through any other enclosure on the way
       // a path only counts as passing an enclosure if it actually runs close beside it
       var near = function (k) { var c = circles[k]; return !c.ghost && segDist(n1.x, n1.y, n2.x, n2.y, c.x, c.y) - c.r <= 14; };
       edges.push({ a: t1, b: t2, len: Math.hypot(n1.x - n2.x, n1.y - n2.y), fronts: uniq([i, j].filter(near).map(own)) });
@@ -852,7 +878,8 @@
   // (Used for the automatic layout and after the player moves things.)
   function finish(circles, clusters, S, nEnt, givenEnts) {
     var style = 'theme-loops';
-    var net = gapNetwork(circles, S), kept = choosePaths(net, circles, clusters, style);
+    var ncs = circles.filter(function (c) { return !c.inHab; });
+    var net = gapNetwork(ncs, S), kept = choosePaths(net, ncs, clusters, style);
     var keptIdx = Object.keys(kept).map(Number), problems = [];
     var keptNet = { nodes: net.nodes, edges: keptIdx.map(function (ei) { return net.edges[ei]; }) };
     keptNet.adj = net.nodes.map(function () { return []; });
@@ -1055,7 +1082,7 @@
     });
     var bb = circleBounds(R.circles, R.ents, 18);
     if (bb.w > S.map || bb.h > S.map) issues.push('This zoo is bigger than a ' + S.map + ' m map.');
-    var res = { R: R, S: S, nEnt: nEnt, auto: auto, issues: issues, bb: bb };
+    var res = { R: R, S: S, nEnt: nEnt, auto: auto, issues: issues, bb: bb, water: autoLakes(R) };
     window.PZ_ZOO_LAYOUT = res; // for troubleshooting
     layoutCache = { key: key, result: res };
     return res;
@@ -1076,7 +1103,17 @@
     ridesOf(p).forEach(function (rd) {
       var sp = rideSpecs[rd.type];
       rd.stations.forEach(function (st) {
-        circles.push({ type: 'station', x: st.x, y: st.y, r: Math.sqrt(sp.w * sp.d / Math.PI), A: sp.w * sp.d, theme: null, cluster: -1, seed: st.id, ride: rd, w: sp.w, d: sp.d, title: rd.name + ' station' });
+        circles.push({ type: 'station', x: st.x, y: st.y, r: Math.hypot(sp.w, sp.d) / 2, A: sp.w * sp.d, theme: null, cluster: -1, seed: st.id, ride: rd, w: sp.w, d: sp.d, title: rd.name + ' station' });
+      });
+    });
+    // stations sitting inside a habitat (gondola, monorail and riverboat stations may) are reached
+    // by their own walkway, so the paths don't need to go round them
+    circles.forEach(function (c) {
+      if (c.type !== 'station') return;
+      c.inHab = circles.some(function (h) {
+        if ((h.type !== 'habitat' && h.type !== 'aquarium') || h.pending) return false;
+        var q = Lm.pos[h.seed], pts = q && q.shape ? scaleShape(q.shape, h.A) : defaultShape(h.seed, Math.sqrt(h.A / Math.PI));
+        return inPoly(outlineSamples(pts, 4).map(function (o) { return { x: h.x + o.x, y: h.y + o.y }; }), c.x, c.y);
       });
     });
     // stretched habitats: fit the outline to the habitat's size and fill it with round pieces,
@@ -1118,10 +1155,12 @@
     }
     if (!Lm.ents || Lm.ents.length !== nEnt) { Lm.ents = R.ents.map(function (e) { return { x: e.cx, y: e.cy }; }); placedNew = true; }
     placePlazas(R, S, Lm.plazas || []);
+    if (!Lm.water) { Lm.water = []; placedNew = true; }
+    if (settleWater(p, true)) placedNew = true; // new habitats get their starting lake
     if (placedNew) save();
     var issues = [];
     if (R.problems.some(function (q) { return q.kind === 'staff'; })) issues.push('Some habitats are more than ' + S.staffMax + ' m from a staff area.');
-    var res = { R: R, S: S, nEnt: nEnt, auto: false, manual: true, issues: issues, bb: circleBounds(R.circles, R.ents, 18) };
+    var res = { R: R, S: S, nEnt: nEnt, auto: false, manual: true, issues: issues, bb: circleBounds(R.circles, R.ents, 18), water: Lm.water || [] };
     window.PZ_ZOO_LAYOUT = res;
     return res;
   }
@@ -1136,7 +1175,7 @@
   function toManual(p) {
     if (p.layout && p.layout.manual) return p.layout;
     var LR = layoutCache.result;
-    var Lm = { manual: true, pos: {}, staff: [], plazas: [], ents: [] };
+    var Lm = { manual: true, pos: {}, staff: [], plazas: [], ents: [], water: LR && LR.water ? JSON.parse(JSON.stringify(LR.water)) : [] };
     if (LR && LR.R) {
       LR.R.circles.forEach(function (c) { if (c.type === 'station') return; if (c.type === 'staff') Lm.staff.push({ id: c.seed, x: c.x, y: c.y }); else Lm.pos[c.seed] = { x: c.x, y: c.y }; });
       LR.R.plazas.forEach(function (q) { if (q.mine) Lm.plazas.push({ id: q.id, x: q.x, y: q.y }); });
@@ -1166,10 +1205,10 @@
     { type: 'train', match: /train/i, name: 'Steam Train', short: 'T', d: { w: 32, d: 16, track: 4, turn: 36, minLen: 11, maxLen: 30 } },
     { type: 'boat', match: /river|boat/i, name: 'Riverboat', short: 'B', d: { w: 12, d: 12, track: 4, turn: 90, minLen: 12, maxLen: 30 } }
   ];
-  var BUILT_RIDES = ['gondola', 'monorail']; // the ride types the planner can place so far
+  var BUILT_RIDES = ['gondola', 'monorail', 'jeep', 'train', 'boat']; // the ride types the planner can place
   var RIDE_COLORS = ['#2563a8', '#a8327e', '#0e7f7b', '#c2571a', '#6a3fb0', '#4a5a6b', '#7a6a0e', '#1f3f8a'];
   var TIGHT_COLOR = '#d0281b';
-  var rideSpecs = {}, editRide = null, delMode = false;
+  var rideSpecs = {}, editRide = null, delMode = false, rideChecks = {};
   RIDE_TYPES.forEach(function (t) { rideSpecs[t.type] = Object.assign({ type: t.type, name: t.name, short: t.short }, t.d); });
 
   function readRides(data, warnings) {
@@ -1250,8 +1289,9 @@
         var t = k / 16, q = bezAt(b, t);
         len += Math.hypot(q.x - last.x, q.y - last.y); last = q;
       }
-      for (k = 0; k <= 16; k++) rmin = Math.min(rmin, bezRadius(b, k / 16));
-      segs.push({ i: i, b: b, len: len, gap: P[i].g, rmin: rmin, tight: rmin < minR * 0.97,
+      var tAt = 0;
+      for (k = 0; k <= 16; k++) { var rr = bezRadius(b, k / 16); if (rr < rmin) { rmin = rr; tAt = k / 16; } }
+      segs.push({ i: i, b: b, len: len, gap: P[i].g, rmin: rmin, at: bezAt(b, tAt), tight: rmin < minR * 0.97,
         d: 'M' + f1(b[0].x) + ' ' + f1(b[0].y) + 'C' + f1(b[1].x) + ' ' + f1(b[1].y) + ',' + f1(b[2].x) + ' ' + f1(b[2].y) + ',' + f1(b[3].x) + ' ' + f1(b[3].y) });
     }
     return segs;
@@ -1284,6 +1324,13 @@
   }
   // Draw one loop through every station of a ride.
   function linkRide(rd, centre) {
+    var sp = rideSpecs[rd.type], st = rd.stations, n = st.length, minR = minRadius(sp);
+    if (!n) return;
+    delete rd.linkNote;
+    if (rideKind(rd.type) !== 'air' && layoutCache.result) { routeRide(rd, layoutCache.result); return; }
+    linkAir(rd, centre);
+  }
+  function linkAir(rd, centre) {
     var sp = rideSpecs[rd.type], st = rd.stations, n = st.length, minR = minRadius(sp);
     if (!n) return;
     var P = [];
@@ -1352,13 +1399,25 @@
     });
     return out;
   }
-  // keep a station off habitats, exhibits and staff areas
-  function clearStation(st, sp, circles) {
-    var sr = Math.sqrt(sp.w * sp.d / Math.PI);
+  // Stations of these rides may sit inside a habitat (a 4x4 or train station may not).
+  var IN_HAB_OK = { gondola: 1, monorail: 1, boat: 1 };
+  function onWaterAt(LR, x, y) {
+    return ((LR && LR.water) || []).some(function (wb) { var P = waterPoly(wb), b = bboxOf(P); return x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1 && inPoly(P, x, y); });
+  }
+  // Keep a station off exhibits and aquariums always; off habitats unless its ride may sit in one;
+  // and off staff areas unless it's on water. A station dropped on water otherwise stays put.
+  function clearStation(st, sp, circles, type, LR) {
+    var sr = Math.hypot(sp.w, sp.d) / 2 * 0.9, wet = onWaterAt(LR, st.x, st.y), inOk = !!IN_HAB_OK[type];
+    var avoid = function (c) {
+      if (c.type === 'exhibits' || c.type === 'walk' || c.type === 'aquarium') return true;
+      if (c.type === 'habitat' || c.type === 'part') return !inOk;
+      if (c.type === 'staff') return !wet;
+      return false;
+    };
     for (var it = 0; it < 30; it++) {
       var moved = false;
       circles.forEach(function (c) {
-        if (c.type === 'station' || c.seed === st.id) return;
+        if (c.type === 'station' || c.seed === st.id || !avoid(c)) return;
         var dx = st.x - c.x, dy = st.y - c.y, d = Math.hypot(dx, dy) || 0.01, need = c.r + sr + 3;
         if (d >= need) return;
         st.x += dx / d * (need - d + 0.5); st.y += dy / d * (need - d + 0.5); moved = true;
@@ -1372,12 +1431,13 @@
     return w ? { x: cx / w, y: cy / w } : { x: 0, y: 0 };
   }
   // the nearest path a station can join without cutting through an enclosure
-  function nearestPathNode(R, x, y) {
+  function nearestPathNode(R, x, y, walkway) {
     var nearest = null;
     R.keptNodes.forEach(function (n) {
       var nd = R.net.nodes[n], d = Math.hypot(nd.x - x, nd.y - y);
       var blocked = R.circles.some(function (c) {
         if (c.type === 'station' && Math.hypot(c.x - x, c.y - y) < 1) return false;
+        if (walkway && (c.type === 'habitat' || c.type === 'part')) return false;
         var vx = nd.x - x, vy = nd.y - y, l2 = vx * vx + vy * vy, u = l2 ? Math.max(0, Math.min(1, ((c.x - x) * vx + (c.y - y) * vy) / l2)) : 0;
         return Math.hypot(x + u * vx - c.x, y + u * vy - c.y) < c.r * 0.85;
       });
@@ -1415,10 +1475,10 @@
   function facilityOptions() {
     var p = plan(), sel = $('add-facility');
     if (!sel) return;
-    var html = '<option value="">Add a staff area, plaza or ride station…</option><option value="staff">Staff area</option><option value="plaza">Guest plaza</option><optgroup label="Ride station">';
+    var html = '<option value="">Add a staff area, plaza, ride station or water…</option><option value="staff">Staff area</option><option value="plaza">Guest plaza</option><optgroup label="Ride station">';
     ridesOf(p).forEach(function (rd) { html += '<option value="st:' + esc(rd.id) + '">Station for ' + esc(rd.name) + '</option>'; });
     BUILT_RIDES.forEach(function (t) { html += '<option value="new:' + t + '">New ' + esc(rideSpecs[t].name.toLowerCase()) + '</option>'; });
-    sel.innerHTML = html + '</optgroup>';
+    sel.innerHTML = html + '</optgroup><optgroup label="Water"><option value="water:lake">Lake</option><option value="water:river">River</option></optgroup>';
   }
   // tapping the track, a bend point, or the open map while a ride is being edited
   function tapTrack(rideId, i, at) {
@@ -1465,14 +1525,16 @@
   function ridesHtml(p) {
     var list = ridesOf(p);
     var html = '<div class="rides"><h3>Transport rides</h3>';
-    if (!list.length) return html + '<p class="muted small">To add a gondola or monorail, choose a new ride under <strong>Add to the map</strong> on the left. Add its stations, drag them into place, then link them into a loop.</p></div>';
+    if (!list.length) return html + '<p class="muted small">To add a ride, choose a new one under <strong>Add to the map</strong> on the left. Add its stations, drag them into place, then link them into a loop.</p></div>';
     list.forEach(function (rd) {
-      var sp = rideSpecs[rd.type], P = trackPts(rd), segs = trackGeo(P, sp), editing = editRide === rd.id;
+      var sp = rideSpecs[rd.type], P = trackPts(rd), rc = rideChecks[rd.id], segs = rc ? rc.segs : trackGeo(P, sp), chk = rc ? rc.chk : { viol: {}, offWater: [] }, editing = editRide === rd.id;
+      segs.forEach(function (g) { if (g.red === undefined) g.red = !g.gap && g.tight; });
       var onTrack = P.filter(function (q) { return q.s; }).length, ns = rd.stations.length;
-      html += '<div class="ride' + (editing ? ' editing' : '') + '"><div class="ride-head"><i style="background:' + rd.color + '"></i><b>' + esc(rd.name) + '</b><span class="muted small">' + ns + ' station' + (ns === 1 ? '' : 's') + '</span>' +
+      html += '<div class="ride' + (editing ? ' editing' : '') + (rd.hidden ? ' hidden-ride' : '') + '"><div class="ride-head"><i style="background:' + rd.color + '"></i><b>' + esc(rd.name) + '</b><span class="muted small">' + ns + ' station' + (ns === 1 ? '' : 's') + '</span>' +
         '<span class="ride-btns"><button type="button" class="secondary small" data-ride-act="link" data-ride="' + rd.id + '"' + (ns ? '' : ' disabled') + '>Link stations</button>' +
-        (segs.some(function (g) { return !g.gap && g.tight; }) ? '<button type="button" class="secondary small" data-ride-act="correct" data-ride="' + rd.id + '">Correct track</button>' : '') +
+        (segs.some(function (g) { return g.red; }) ? '<button type="button" class="secondary small" data-ride-act="correct" data-ride="' + rd.id + '">Correct track</button>' : '') +
         (rd.track ? '<button type="button" class="secondary small" data-ride-act="edit" data-ride="' + rd.id + '">' + (editing ? 'Done' : 'Edit track') + '</button>' : '') +
+        '<button type="button" class="secondary small" data-ride-act="hide" data-ride="' + rd.id + '" aria-pressed="' + (rd.hidden ? 'true' : 'false') + '">' + (rd.hidden ? 'Show' : 'Hide') + '</button>' +
         '<button type="button" class="secondary small danger" data-ride-act="remove" data-ride="' + rd.id + '">Remove ride</button></span></div>';
       var notes = [];
       if (!ns) notes.push('No stations yet. Add one from <strong>Add to the map</strong>.');
@@ -1481,13 +1543,19 @@
         if (onTrack < ns) notes.push((ns - onTrack) + ' station' + (ns - onTrack === 1 ? ' isn’t' : 's aren’t') + ' on the track yet. Click <strong>Link stations</strong> to redraw the loop through every station.');
         if (segs.some(function (g) { return g.gap; })) notes.push('The track has a gap, so it isn’t a loop yet. Click <strong>Edit track</strong>, then tap the map to draw track from the nearest loose end, and tap the other loose end to join it.');
         if (segs.some(function (g) { return !g.gap && g.tight; })) notes.push('Bends in red are too tight for a ' + esc(sp.name.toLowerCase()) + '. Click <strong>Correct track</strong> to smooth them.');
+        if (segs.some(function (g) { return !g.gap && g.viol > 0 && !g.tight; }) && !chk.selfClose) notes.push(rd.type === 'boat' ? 'Red stretches leave the water, or the water there is narrower than ' + sp.track + ' m. Click <strong>Correct track</strong>, or widen the water.' :
+          'Red stretches go through ' + (rd.type === 'train' ? 'a habitat, aquarium or exhibit, which a steam train can’t do' : 'an aquarium or exhibit, which a 4x4 can’t do') + '. Click <strong>Correct track</strong>, or move a station.');
+        if (chk.selfClose) notes.push('The boat track runs too close to itself. Widen the river (10 m works well, with wider water at the ends for turning) or make a river loop.');
+        if (chk.offWater && chk.offWater.length) notes.push(chk.offWater.length + ' station' + (chk.offWater.length === 1 ? ' isn’t' : 's aren’t') + ' at the water’s edge. A riverboat station needs its track on the water.');
       }
+      if (rd.linkNote) notes.push(esc(rd.linkNote));
       if (editing) {
         html += '<p class="small ride-help">' + (delMode ? '<strong>Tap the stretch of track to delete.</strong>' :
           'Drag the dots to reshape the track. Tap the track to add a dot; tap a dot to remove it. Tap an empty spot on the map when you’re done.') + '</p>' +
           '<div class="row small"><button type="button" class="secondary small' + (delMode ? ' on' : '') + '" data-ride-act="delmode" data-ride="' + rd.id + '">' + (delMode ? 'Cancel delete' : 'Delete a section') + '</button></div>';
       }
       if (notes.length) html += '<div class="note bad small">' + notes.join('<br>') + '</div>';
+      if (chk.bridges) html += '<p class="small muted ride-help">Track path requires bridges or tunnels.</p>';
       html += '</div>';
     });
     return html + '</div>';
@@ -1498,15 +1566,23 @@
     if (act === 'link') {
       linkRide(rd, zooCentre(layoutCache.result));
       changed();
-      var bad = trackGeo(trackPts(rd), rideSpecs[rd.type]).some(function (g) { return g.tight; });
-      toast(rd.name + ' linked' + (bad ? '. Some bends are too tight (shown in red)' : ''));
+      var rcl = rideChecks[rd.id], bad = rcl && rcl.segs.some(function (g) { return g.red; });
+      toast(rd.linkNote ? rd.linkNote : rd.name + ' linked' + (bad ? '. Some stretches need attention (shown in red)' : ''));
     } else if (act === 'correct') {
-      var left = correctTrack(rd);
+      var left = correctTrack(rd, rideRuleFn(rd, layoutCache.result));
       changed();
-      if (!left.length) toast(rd.name + ' track corrected');
+      var rcc = rideChecks[rd.id], stillRed = rcc && rcc.segs.some(function (g) { return g.red; });
+      if (!left.length && stillRed) toast(rcc.chk.selfClose ? 'Mostly fixed. Where the red is, the boat lanes cross or touch. Drag a dot to separate them' : 'Mostly fixed. Drag the dots near the red to finish it');
+      else if (!left.length) toast(rd.name + ' track corrected');
+      else if (left.some(function (x) { return x.rule; })) toast('Part of the track still goes where a ' + rideSpecs[rd.type].name.toLowerCase() + ' can’t. Try moving a station, or drag the dots round the obstacle');
       else if (left.some(function (x) { return x.atStation; })) toast('Some bends right beside a station couldn’t be fixed. Try moving that station further from its neighbours, or adding a dot to give the track more room to turn');
       else toast('Some bends couldn’t be smoothed without moving the track a lot. Try dragging the dots further apart');
+    } else if (act === 'hide') {
+      rd.hidden = !rd.hidden;
+      if (rd.hidden && editRide === id) { editRide = null; delMode = false; }
+      changed();
     } else if (act === 'edit') {
+      if (rd.hidden) { rd.hidden = false; save(); }
       editRide = editRide === id ? null : id; delMode = false; render();
     } else if (act === 'delmode') {
       delMode = !delMode; render();
@@ -1555,7 +1631,7 @@
       var d = Math.hypot(q.x - cx, q.y - cy);
       if (d - rin < 3) return;
       var rp = Math.max(4, Math.min(18, (d - rin) / 2 + 3)), x = q.x + (cx - q.x) / d * rp, y = q.y + (cy - q.y) / d * rp;
-      if (parts.some(function (o) { return Math.hypot(o.x - x, o.y - y) < Math.min(o.r, rp) * 0.6; })) return;
+      if (parts.some(function (o) { return Math.hypot(o.x - x, o.y - y) < Math.min(o.r, rp) * 0.35; })) return;
       parts.push({ x: x, y: y, r: rp });
     });
     return { rin: Math.max(rin, 4), parts: parts };
@@ -1566,7 +1642,8 @@
     var w = [];
     if (hasStations(p)) w.push('your transport rides');
     if (hasShapes(p)) w.push('your habitat shapes');
-    return w.join(' and ');
+    if (hasWaterEdits(p)) w.push('your lake and river changes');
+    return w.length > 1 ? w.slice(0, -1).join(', ') + ' and ' + w[w.length - 1] : w.join('');
   }
   function stretchPoint(seed, k, dx, dy) {
     var p = plan(), LR = layoutCache.result, c = LR && LR.R.circles.filter(function (o) { return o.seed === seed; })[0];
@@ -1584,10 +1661,17 @@
       if (shapeArea(pts) < minA) pts = scaleShape(pts, minA);
       toast('That’s the minimum size for this habitat (' + fmt(minA) + ' m²)');
     }
-    pos.shape = pts;
-    c.unit.h.size = Math.max(Math.ceil(minA), Math.round(shapeArea(pts)));
+    var inside = containedWater(p), before = snapPos(p), h0 = c.unit.h.size, from = (pos.shape || defaultShape(seed, Math.sqrt(c.A / Math.PI))).map(function (q) { return { x: q.x, y: q.y }; });
+    var hab = p.habitats.filter(function (x) { return 'h' + x.id === seed; })[0] || c.unit.h;
+    var who = guardedWaterEdit(p, function (t) {
+      pos.shape = from.map(function (q, i) { return { x: q.x + (pts[i].x - q.x) * t, y: q.y + (pts[i].y - q.y) * t }; });
+      hab.size = t ? Math.max(Math.ceil(minA), Math.round(shapeArea(pos.shape))) : h0;
+    });
+    if (!pos.shape || shapeArea(pos.shape) < minA - 1) { pos.shape = pts; hab.size = Math.max(Math.ceil(minA), Math.round(shapeArea(pts))); }
     makeRoom(Lm, seed, pos);
+    followWater(p, inside, before);
     changed();
+    if (who) toast('Stopped there: going further would leave ' + who + ' short of water');
   }
   function shapeAction(act) {
     var p = plan(), pos = p.layout && p.layout.pos && p.layout.pos[shapeSel];
@@ -1598,63 +1682,933 @@
   // ---------- CORRECT TRACK ----------
   // Smooth only the bend points round each too-tight bend, a little at a time, until
   // nothing is red. Stations never move. Returns how many tight bends are left.
-  function correctTrack(rd) {
-    var sp = rideSpecs[rd.type], minR = minRadius(sp);
+  function correctTrack(rd, rules) {
+    var sp = rideSpecs[rd.type], minR = minRadius(sp), tightR = minR * 0.97;
     if (!rd.track) return [];
-    function badness() { return trackGeo(trackPts(rd), sp).reduce(function (s, g) { return s + (g.tight && !g.gap ? minR - Math.min(g.rmin, minR) + 1 : 0); }, 0); }
-    var start = { bad: badness(), track: JSON.parse(JSON.stringify(rd.track)) };
-    if (start.bad > 0) {
-      // first: run the track straight through any station with a tight bend beside it
-      var P0 = trackPts(rd), n0 = P0.length, geo0 = trackGeo(P0, sp), locked = {};
-      P0.forEach(function (q, i) {
-        if (!q.s) return;
-        var ip = (i - 1 + n0) % n0, inx = (i + 1) % n0;
-        if (![(i - 2 + n0) % n0, ip, i, inx].some(function (k) { return geo0[k].tight && !geo0[k].gap; })) return;
-        if (rd.track[ip].s || rd.track[inx].s) return;
-        var a = P0[ip], b = P0[inx], ux = b.x - a.x, uy = b.y - a.y, ul = Math.hypot(ux, uy) || 1;
-        ux /= ul; uy /= ul;
-        var d = Math.max(minR, Math.min(Math.hypot(a.x - q.x, a.y - q.y), Math.hypot(b.x - q.x, b.y - q.y)));
-        rd.track[ip] = Object.assign({}, rd.track[ip], { x: q.x - ux * d, y: q.y - uy * d });
-        rd.track[inx] = Object.assign({}, rd.track[inx], { x: q.x + ux * d, y: q.y + uy * d });
-        locked[ip] = locked[inx] = true;
-      });
-      // then: nudge only the bend points round each tight bend, a little at a time, in whichever
-      // direction makes the bend gentler (stations never move)
-      var T = rd.track, n = T.length, orig = T.map(function (q) { return { x: q.x, y: q.y }; });
-      var P = trackPts(rd);
-      var segBad = function (i) {
-        i = (i + n) % n;
-        if (P[i].g) return 0;
-        var b = segBez(P, i), r = Infinity;
-        for (var k = 0; k <= 16; k++) r = Math.min(r, bezRadius(b, k / 16));
-        return r < minR * 0.97 ? minR - Math.min(r, minR) + 1 : 0;
+    // dots almost on top of each other make a tiny, too-tight bend: merge them first
+    var mergeD = Math.max(sp.minLen * 0.5, 3), merged = true;
+    while (merged && rd.track && rd.track.length > 3) {
+      merged = false;
+      var Pm = trackPts(rd), nm = Pm.length;
+      for (var mi = 0; mi < nm; mi++) {
+        var a0 = Pm[mi], b0 = Pm[(mi + 1) % nm];
+        if (Math.hypot(a0.x - b0.x, a0.y - b0.y) >= mergeD) continue;
+        var drop = !rd.track[(mi + 1) % nm].s ? (mi + 1) % nm : !rd.track[mi].s ? mi : -1;
+        if (drop < 0) continue;
+        dropPoint(rd, drop); merged = true; break;
+      }
+    }
+    if (!rd.track) return [];
+    var startTrack = JSON.parse(JSON.stringify(rd.track));
+    function segR(P, i) { var b = segBez(P, i), r = Infinity; for (var k = 0; k <= 20; k++) r = Math.min(r, bezRadius(b, k / 20)); return r; }
+    // how bad one stretch is: too tight, plus (for ground and water rides) going where the ride can't
+    function segPen(P, i) { var r = segR(P, i), v = r < minR ? minR - r : 0; if (rules) v += rules(P, i) * 3; return v; }
+    function segBad(P, i) { return segR(P, i) < tightR || (rules && rules(P, i) > 0); }
+    function deficit(P) { var tot = 0; for (var i = 0; i < P.length; i++) { if (P[i].g) continue; tot += segPen(P, i); } return tot; }
+    function anyTight(P) { for (var i = 0; i < P.length; i++) if (!P[i].g && segBad(P, i)) return true; return false; }
+    var startDef = deficit(trackPts(rd)), t0 = Date.now();
+    var dirs = [];
+    for (var a8 = 0; a8 < 8; a8++) dirs.push({ x: Math.cos(a8 * Math.PI / 4), y: Math.sin(a8 * Math.PI / 4) });
+    for (var pass = 0; pass < 4; pass++) {
+      var P = trackPts(rd), n = P.length, i;
+      if (!anyTight(P)) break;
+      if (pass > 0) {
+        // still tight: give long tight stretches an extra dot, so the bend has more room
+        var ins = [];
+        for (i = 0; i < n; i++) if (!P[i].g && segBad(P, i) && Math.hypot(P[(i + 1) % n].x - P[i].x, P[(i + 1) % n].y - P[i].y) > sp.minLen * 1.5) ins.push(i);
+        ins.reverse().forEach(function (k) { var m = bezAt(segBez(P, k), 0.5); rd.track.splice(k + 1, 0, { x: m.x, y: m.y }); });
+        P = trackPts(rd); n = P.length;
+      }
+      var orig = P.map(function (q) { return { x: q.x, y: q.y }; }), free = rd.track.map(function (q) { return !q.s; });
+      // the cost: how much too tight, plus a small charge for moving dots (so they stay near where they were put)
+      // only the stretches near the tight bends are measured, which keeps it quick
+      var win = [];
+      var cost = function () {
+        var c = 0;
+        win.forEach(function (k) { if (P[k].g) return; c += segPen(P, k) * 10; });
+        for (var k = 0; k < n; k++) if (free[k]) c += 0.01 * (Math.pow(P[k].x - orig[k].x, 2) + Math.pow(P[k].y - orig[k].y, 2));
+        return c;
       };
-      var local = function (k) { return segBad(k - 2) + segBad(k - 1) + segBad(k) + segBad(k + 1); };
-      var dirs = [];
-      for (var a8 = 0; a8 < 8; a8++) dirs.push({ x: Math.cos(a8 * Math.PI / 4), y: Math.sin(a8 * Math.PI / 4) });
-      for (var step = Math.max(2, minR / 4), guard = 0; step >= 0.5 && guard < 300; guard++) {
-        var near = {}, any = false;
-        for (var i = 0; i < n; i++) if (segBad(i)) { any = true; [-1, 0, 1, 2].forEach(function (d) { near[(i + d + n) % n] = true; }); }
-        if (!any) break;
+      for (var step = Math.max(3, minR / 4), guard = 0; step >= 0.25 && guard < 400 && Date.now() - t0 < 1500; guard++) {
+        var near = {}, ws = {};
+        for (i = 0; i < n; i++) if (!P[i].g && segBad(P, i)) for (var d = -3; d <= 4; d++) near[(i + d + n) % n] = true;
+        if (!Object.keys(near).length) break;
+        Object.keys(near).forEach(function (k) { for (var d2 = -2; d2 <= 1; d2++) ws[(Number(k) + d2 + n) % n] = true; });
+        win = Object.keys(ws).map(Number);
+        var cur = cost();
         var improved = false;
-        Object.keys(near).forEach(function (kk) {
-          var k = Number(kk);
-          if (T[k].s) return;
-          var base = local(k), q0 = { x: P[k].x, y: P[k].y }, bestMove = null;
-          dirs.forEach(function (d) {
-            P[k].x = q0.x + d.x * step; P[k].y = q0.y + d.y * step;
-            var v = local(k) + 0.001 * Math.hypot(P[k].x - orig[k].x, P[k].y - orig[k].y);
-            if (v < base - 1e-3 && (!bestMove || v < bestMove.v)) bestMove = { v: v, x: P[k].x, y: P[k].y };
+        Object.keys(near).map(Number).forEach(function (k) {
+          // move one dot, or two or three neighbouring dots together
+          [[k], [k, (k + 1) % n], [(k - 1 + n) % n, k, (k + 1) % n]].forEach(function (group) {
+            if (group.some(function (g) { return !free[g]; })) return;
+            var save = group.map(function (g) { return { x: P[g].x, y: P[g].y }; }), best = null;
+            dirs.forEach(function (dv) {
+              group.forEach(function (g, j) { P[g].x = save[j].x + dv.x * step; P[g].y = save[j].y + dv.y * step; });
+              var c = cost();
+              if (c < cur - 1e-6 && (!best || c < best.c)) best = { c: c, dv: dv };
+            });
+            group.forEach(function (g, j) { P[g].x = save[j].x + (best ? best.dv.x * step : 0); P[g].y = save[j].y + (best ? best.dv.y * step : 0); });
+            if (best) { cur = best.c; improved = true; }
           });
-          if (bestMove) { P[k].x = bestMove.x; P[k].y = bestMove.y; improved = true; } else { P[k].x = q0.x; P[k].y = q0.y; }
         });
         if (!improved) step /= 2;
       }
-      rd.track = T.map(function (q, i) { return q.s ? q : Object.assign({}, q, { x: P[i].x, y: P[i].y }); });
-      if (badness() > start.bad) rd.track = start.track;
+      rd.track = rd.track.map(function (q, k) { return q.s ? q : Object.assign({}, q, { x: P[k].x, y: P[k].y }); });
     }
+    if (deficit(trackPts(rd)) > startDef + 1e-6) rd.track = startTrack; // never leave it worse
     var P1 = trackPts(rd), n1 = P1.length;
-    return trackGeo(P1, sp).filter(function (g) { return g.tight && !g.gap; }).map(function (g) { return { atStation: !!(P1[g.i].s || P1[(g.i + 1) % n1].s) }; });
+    return P1.map(function (q, i) { return i; }).filter(function (i) { return !P1[i].g && segBad(P1, i); }).map(function (i) { return { atStation: !!(P1[i].s || P1[(i + 1) % n1].s), rule: !!(rules && rules(P1, i) > 0) }; });
+  }
+
+  // ---------- WATER ----------
+  // Lakes and rivers are their own things on the map. Each habitat counts the water inside
+  // its own outline; water outside every habitat is open water. A habitat that needs water
+  // gets a starting lake (home lake) in its middle, sized to the need. The 25% extra goes to land.
+  var waterSel = null, waterEdit = null, lastWater = null;
+  var WATER_FILL = '#a6d3ec', WATER_EDGE = '#5d9cc2';
+  function bezOpen(L, i) {
+    var n = L.length, p0 = L[Math.max(0, i - 1)], p1 = L[i], p2 = L[i + 1], p3 = L[Math.min(n - 1, i + 2)];
+    var d01 = Math.hypot(p1.x - p0.x, p1.y - p0.y), d12 = Math.hypot(p2.x - p1.x, p2.y - p1.y), d23 = Math.hypot(p3.x - p2.x, p3.y - p2.y);
+    var k1 = d12 / 3 / ((d01 + d12) || 1), k2 = d12 / 3 / ((d12 + d23) || 1);
+    return [p1, { x: p1.x + (p2.x - p0.x) * k1, y: p1.y + (p2.y - p0.y) * k1 }, { x: p2.x - (p3.x - p1.x) * k2, y: p2.y - (p3.y - p1.y) * k2 }, p2];
+  }
+  function lineSamples(L, per) {
+    var out = [];
+    for (var i = 0; i < L.length - 1; i++) { var b = bezOpen(L, i); for (var k = 0; k < per; k++) out.push(bezAt(b, k / per)); }
+    out.push(L[L.length - 1]);
+    return out;
+  }
+  // a river is a bendy line with a width; its outline is the line widened, with round ends
+  function riverPoly(wb) {
+    var L = wb.line.map(function (q) { return { x: wb.x + q.x, y: wb.y + q.y }; }), s = lineSamples(L, 6), h = wb.w / 2, left = [], right = [], n = s.length;
+    var tan = function (i) { var a = s[Math.max(0, i - 1)], b = s[Math.min(n - 1, i + 1)], tx = b.x - a.x, ty = b.y - a.y, tl = Math.hypot(tx, ty) || 1; return { x: tx / tl, y: ty / tl }; };
+    s.forEach(function (q, i) { var t = tan(i); left.push({ x: q.x - t.y * h, y: q.y + t.x * h }); right.push({ x: q.x + t.y * h, y: q.y - t.x * h }); });
+    function cap(c, t, from) {
+      var out = [];
+      [30, 60, 90, 120, 150].forEach(function (a) {
+        a = (from + a) * Math.PI / 180;
+        // in the frame of the line: along = t, across = (-t.y, t.x)
+        var ca = Math.cos(a), sa = Math.sin(a);
+        out.push({ x: c.x + h * (ca * -t.y + sa * t.x), y: c.y + h * (ca * t.x + sa * t.y) });
+      });
+      return out;
+    }
+    var tEnd = tan(n - 1), tStart = tan(0);
+    return left.concat(cap(s[n - 1], tEnd, 0), right.reverse(), cap(s[0], tStart, 180));
+  }
+  function waterPoly(wb) {
+    if (wb.kind === 'river') return riverPoly(wb);
+    return outlineSamples(wb.pts, 6).map(function (q) { return { x: wb.x + q.x, y: wb.y + q.y }; });
+  }
+  function waterArea(wb) { return polyArea(waterPoly(wb)); }
+  function polyD(P) { return 'M' + P.map(function (q) { return f1(q.x) + ' ' + f1(q.y); }).join('L') + 'Z'; }
+  function bboxOf(P) {
+    var b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    P.forEach(function (q) { b.x0 = Math.min(b.x0, q.x); b.y0 = Math.min(b.y0, q.y); b.x1 = Math.max(b.x1, q.x); b.y1 = Math.max(b.y1, q.y); });
+    return b;
+  }
+  function inPoly(P, x, y) {
+    var c = false;
+    for (var i = 0, j = P.length - 1; i < P.length; j = i++) {
+      if ((P[i].y > y) !== (P[j].y > y) && x < (P[j].x - P[i].x) * (y - P[i].y) / (P[j].y - P[i].y) + P[i].x) c = !c;
+    }
+    return c;
+  }
+  // every habitat's outline, from the saved plan (used while changing things)
+  function habPolysState(p) {
+    var Lm = p.layout, out = [];
+    if (!Lm || !Lm.pos) return out;
+    p.habitats.forEach(function (h, i) {
+      var seed = 'h' + h.id, pos = Lm.pos[seed], inf = habitatInfo(h);
+      if (!pos || inf.aquarium) return;
+      var pts = pos.shape ? scaleShape(pos.shape, inf.area) : defaultShape(seed, Math.sqrt(Math.max(inf.area, 16) / Math.PI));
+      var P = outlineSamples(pts, 6).map(function (q) { return { x: pos.x + q.x, y: pos.y + q.y }; });
+      out.push({ seed: seed, h: h, num: i + 1, inf: inf, P: P, bb: bboxOf(P), pos: pos });
+    });
+    return out;
+  }
+  // every habitat's outline, from the layout being drawn
+  function habPolysLayout(R) {
+    var out = [];
+    R.circles.forEach(function (c) {
+      if (c.type !== 'habitat' || !c.unit) return;
+      var pts = c.shape || defaultShape(c.seed, Math.sqrt(c.A / Math.PI));
+      var P = outlineSamples(pts, 6).map(function (q) { return { x: c.x + q.x, y: c.y + q.y }; });
+      out.push({ seed: c.seed, h: c.unit.h, num: c.unit.num, inf: { water: c.unit.water, deep: c.unit.deep, base: c.unit.base, area: c.A }, P: P, bb: bboxOf(P) });
+    });
+    return out;
+  }
+  // How much water is inside each habitat, how much is open water, and where each lake or river sits.
+  // Worked out on a fine grid, so overlapping water is only counted once.
+  function waterStats(habs, bodies) {
+    var res = { hab: {}, open: 0, body: {} };
+    if (!bodies || !bodies.length) return res;
+    var B = bodies.map(function (wb) { var P = waterPoly(wb); return { wb: wb, P: P, bb: bboxOf(P) }; });
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    B.forEach(function (b) { x0 = Math.min(x0, b.bb.x0); y0 = Math.min(y0, b.bb.y0); x1 = Math.max(x1, b.bb.x1); y1 = Math.max(y1, b.bb.y1); res.body[b.wb.id] = { total: 0, by: {} }; });
+    var cell = Math.max(0.8, Math.sqrt((x1 - x0) * (y1 - y0) / 160000)), ca = cell * cell;
+    for (var y = y0 + cell / 2; y < y1; y += cell) {
+      for (var x = x0 + cell / 2; x < x1; x += cell) {
+        var hit = null;
+        for (var k = 0; k < B.length; k++) {
+          var b = B[k];
+          if (x < b.bb.x0 || x > b.bb.x1 || y < b.bb.y0 || y > b.bb.y1 || !inPoly(b.P, x, y)) continue;
+          (hit = hit || []).push(b);
+        }
+        if (!hit) continue;
+        var hs = null;
+        for (var m = 0; m < habs.length; m++) {
+          var H = habs[m];
+          if (x < H.bb.x0 || x > H.bb.x1 || y < H.bb.y0 || y > H.bb.y1 || !inPoly(H.P, x, y)) continue;
+          hs = H.seed; break;
+        }
+        if (hs) res.hab[hs] = (res.hab[hs] || 0) + ca; else res.open += ca;
+        for (k = 0; k < hit.length; k++) { var r = res.body[hit[k].wb.id]; r.total += ca; if (hs) r.by[hs] = (r.by[hs] || 0) + ca; }
+      }
+    }
+    return res;
+  }
+  function waterTol(need) { return Math.max(3, need * 0.004); }
+  // how much water each habitat is short of
+  function shortfalls(habs, st, exact) {
+    var out = {};
+    habs.forEach(function (H) {
+      var need = H.inf.water || 0;
+      if (need <= 0) return;
+      var have = st.hab[H.seed] || 0;
+      if (have < need - (exact ? 0.5 : waterTol(need))) out[H.seed] = need - have;
+    });
+    return out;
+  }
+  function newLake(cx, cy, area, home, need) {
+    return { id: 'wa' + uid(), kind: 'lake', x: cx, y: cy, pts: scaleShape(defaultShape('lake' + uid(), 10), Math.max(area, 20)), home: home || null, forNeed: need || 0 };
+  }
+  // the starting lakes for a layout nobody has changed by hand
+  function autoLakes(R) {
+    var out = [];
+    R.circles.forEach(function (c) {
+      if (c.type !== 'habitat' || !c.unit || !(c.unit.water > 0)) return;
+      var wl = newLake(c.x, c.y, c.unit.water * 1.02, c.seed, c.unit.water);
+      wl.id = 'wa' + c.seed;
+      wl.pts = scaleShape(defaultShape('lake' + c.seed, 10), c.unit.water * 1.02);
+      out.push(wl);
+    });
+    return out;
+  }
+  // which lakes and rivers sit entirely inside one habitat (they move with it)
+  function containedWater(p) {
+    var Lm = p.layout, out = [];
+    if (!Lm || !Lm.water || !Lm.water.length) return out;
+    var st = waterStats(habPolysState(p), Lm.water);
+    Lm.water.forEach(function (wb) {
+      var r = st.body[wb.id];
+      if (!r || !r.total) return;
+      Object.keys(r.by).forEach(function (s) { if (r.by[s] >= r.total * 0.97) out.push({ wb: wb, seed: s }); });
+    });
+    return out;
+  }
+  function snapPos(p) { var o = {}, pos = p.layout && p.layout.pos; if (pos) Object.keys(pos).forEach(function (k) { o[k] = { x: pos[k].x, y: pos[k].y }; }); return o; }
+  // after habitats have moved, bring along the water that was entirely inside each one
+  function followWater(p, inside, before) {
+    var pos = p.layout.pos;
+    inside.forEach(function (c) {
+      var now = pos[c.seed], was = before[c.seed];
+      if (now && was && (now.x !== was.x || now.y !== was.y)) { c.wb.x += now.x - was.x; c.wb.y += now.y - was.y; }
+    });
+  }
+  // Keep every habitat supplied: starting lakes follow the animals' needs, a habitat that's
+  // short of water gets a lake in its middle, and a habitat whose water has eaten into its
+  // minimum land grows (keeping its shape) and pushes its neighbours aside.
+  function settleWater(p, noGrow) {
+    var Lm = p.layout;
+    if (!Lm || !Lm.manual) return false;
+    Lm.water = Lm.water || [];
+    var any = false;
+    for (var round = 0; round < 5; round++) {
+      var habs = habPolysState(p), st = waterStats(habs, Lm.water), did = false;
+      habs.forEach(function (H) {
+        var need = H.inf.water || 0, have = st.hab[H.seed] || 0;
+        var homes = Lm.water.filter(function (w) { return w.home === H.seed; }), home = null;
+        homes.forEach(function (w) {
+          var r = st.body[w.id], inside = r && r.total && (r.by[H.seed] || 0) >= r.total * 0.97;
+          if (inside && !home) home = w; else w.home = null; // water left behind is no longer this habitat's own
+        });
+        if (home && Math.abs((home.forNeed || 0) - need) > 1) {
+          // the animals changed: the starting lake changes by the same amount
+          var target = waterArea(home) + (need - (home.forNeed || 0));
+          home.forNeed = need;
+          if (target < 20) Lm.water.splice(Lm.water.indexOf(home), 1); else home.pts = scaleShape(home.pts, target);
+          did = true; return;
+        }
+        if (need > 0 && have < need - waterTol(need)) {
+          var add = (need - have) * 1.04 + 10;
+          if (home) home.pts = scaleShape(home.pts, waterArea(home) + add);
+          else Lm.water.push(newLake(H.pos.x, H.pos.y, add, H.seed, need));
+          did = true;
+        }
+      });
+      if (!noGrow && !did) {
+        habs.forEach(function (H) {
+          var landMin = H.inf.base - (H.inf.water || 0), have = st.hab[H.seed] || 0, land = H.inf.area - have;
+          if (land >= landMin - Math.max(8, landMin * 0.01)) return;
+          var inside = containedWater(p), before = snapPos(p);
+          H.h.size = Math.ceil(have + landMin + 10);
+          if (layoutCache.result) makeRoom(Lm, H.seed, H.pos);
+          followWater(p, inside, before);
+          did = true;
+        });
+      }
+      if (!did) break;
+      any = true;
+    }
+    return any;
+  }
+  // Change a lake or river (setAt(0) = as it was, setAt(1) = the full change). If the change
+  // would leave a habitat short of water, it stops at the last point where none is short.
+  function guardedWaterEdit(p, setAt) {
+    var Lm = p.layout;
+    if (!Lm.water || !Lm.water.length) { setAt(1); return null; }
+    var check = function () { var habs = habPolysState(p); return shortfalls(habs, waterStats(habs, Lm.water), true); };
+    setAt(0);
+    var before = check();
+    var worse = function () { var s = check(); return Object.keys(s).filter(function (k) { return s[k] > (before[k] || 0) + 2; })[0]; };
+    setAt(1);
+    var bad = worse();
+    if (!bad) return null;
+    var lo = 0, hi = 1;
+    for (var it = 0; it < 9; it++) { var m = (lo + hi) / 2; setAt(m); if (worse()) hi = m; else lo = m; }
+    setAt(lo);
+    var H = habPolysState(p).filter(function (x) { return x.seed === bad; })[0];
+    return H ? 'Habitat ' + H.num : 'a habitat';
+  }
+  function findWater(p, id) { var W = (p.layout && p.layout.water) || []; return W.filter(function (w) { return w.id === id; })[0]; }
+  function moveWater(id, dx, dy) {
+    var p = plan(); toManual(p);
+    var wb = findWater(p, id);
+    if (!wb) return;
+    var x0 = wb.x, y0 = wb.y;
+    var who = guardedWaterEdit(p, function (t) { wb.x = x0 + dx * t; wb.y = y0 + dy * t; });
+    wb.edited = true;
+    changed();
+    if (who) toast('Stopped there: moving it further would leave ' + who + ' short of water');
+  }
+  function stretchWater(id, k, dx, dy) {
+    var p = plan(); toManual(p);
+    var wb = findWater(p, id);
+    if (!wb) return;
+    var arr = wb.kind === 'river' ? wb.line : wb.pts, o = { x: arr[k].x, y: arr[k].y };
+    // an end dot dropped on the end of another river joins the two into one river
+    if (wb.kind === 'river' && (k === 0 || k === arr.length - 1) && joinRivers(p, wb, k, wb.x + o.x + dx, wb.y + o.y + dy)) return;
+    var who = guardedWaterEdit(p, function (t) { arr[k] = { x: o.x + dx * t, y: o.y + dy * t }; });
+    if (waterArea(wb) < 20) { arr[k] = o; toast('That’s as small as it can go'); }
+    wb.edited = true;
+    changed();
+    if (who) toast('Stopped there: making it smaller would leave ' + who + ' short of water');
+  }
+  var RIVER_MIN = 4, RIVER_MAX = 20;
+  function unitsPerPx() { var svg = document.querySelector('#panel .zoo-map'), m = svg && svg.getScreenCTM && svg.getScreenCTM(); return m && m.a ? 1 / m.a : 0.5; }
+  function joinRivers(p, wb, k, ax, ay) {
+    var snap = Math.max(4, 14 * unitsPerPx()), W = p.layout.water, target = null;
+    W.forEach(function (o) {
+      if (o === wb || o.kind !== 'river' || target) return;
+      [0, o.line.length - 1].forEach(function (e) {
+        var ex = o.x + o.line[e].x, ey = o.y + o.line[e].y;
+        if (!target && Math.hypot(ex - ax, ey - ay) <= snap) target = { o: o, e: e };
+      });
+    });
+    if (!target) return false;
+    var abs = function (r) { return r.line.map(function (q) { return { x: r.x + q.x, y: r.y + q.y }; }); };
+    var A = abs(wb), B = abs(target.o);
+    if (k === 0) A.reverse();            // A now ends at the dot that was dropped
+    if (target.e !== 0) B.reverse();     // B now starts at the end it was dropped on
+    var joined = A.slice(0, -1).concat(B); // the dropped dot lands exactly on B's end
+    var saved = { line: wb.line, x: wb.x, y: wb.y, w: wb.w }, idx = W.indexOf(target.o);
+    var who = tryWaterChange(p, function () {
+      wb.line = joined.map(function (q) { return { x: q.x - wb.x, y: q.y - wb.y }; });
+      wb.w = Math.max(wb.w, target.o.w);
+      W.splice(idx, 1);
+    }, function () {
+      wb.line = saved.line; wb.w = saved.w;
+      if (W.indexOf(target.o) < 0) W.splice(idx, 0, target.o);
+    });
+    if (who) { render(); toast('Can’t join these: ' + who + ' would be short of water'); return true; }
+    wb.edited = true;
+    changed(); toast('Rivers joined');
+    return true;
+  }
+  function setRiverWidth(want) {
+    var p = plan(), wb = waterSel && findWater(p, waterSel);
+    if (!wb || wb.kind !== 'river') return;
+    want = Math.round(Number(want));
+    if (!(want > 0)) { render(); return; }
+    var w1 = Math.max(RIVER_MIN, Math.min(RIVER_MAX, want)), w0 = wb.w;
+    if (w1 !== want) toast(want > RIVER_MAX ? 'Rivers go up to ' + RIVER_MAX + ' m wide. For wider water, use a lake' : 'Rivers are at least ' + RIVER_MIN + ' m wide');
+    var who = guardedWaterEdit(p, function (t) { wb.w = w0 + (w1 - w0) * t; });
+    wb.w = Math.round(wb.w * 10) / 10;
+    wb.edited = true;
+    changed();
+    if (who) toast('Stopped at ' + wb.w + ' m: any narrower would leave ' + who + ' short of water');
+  }
+  function addWater(kind) {
+    var p = plan();
+    if (!p.habitats.length && !p.exhibits.length) { toast('Add some animals first'); return; }
+    var Lm = toManual(p), LR = layoutCache.result;
+    Lm.water = Lm.water || [];
+    var right = -Infinity, top = Infinity;
+    if (LR && LR.R) {
+      LR.R.circles.forEach(function (c) { right = Math.max(right, c.x + c.r); top = Math.min(top, c.y - c.r); });
+      LR.R.ents.forEach(function (e) { right = Math.max(right, e.x + e.w); });
+      (LR.R.plazas || []).forEach(function (q) { right = Math.max(right, q.x + q.w); });
+    }
+    if (right === -Infinity) { right = 0; top = 0; }
+    var wb;
+    if (kind === 'lake') { wb = newLake(right + 40, top + 30, 700, null, 0); }
+    else {
+      // a straight stretch to start; drag the ends to lengthen it, tap it to add bends, and overlap rivers to join them
+      wb = { id: 'wr' + uid(), kind: 'river', x: right + 30, y: top + 40, w: 4, home: null, forNeed: 0, line: [{ x: 0, y: 0 }, { x: 30, y: 0 }, { x: 60, y: 0 }] };
+    }
+    wb.edited = true;
+    Lm.water.push(wb);
+    waterSel = wb.id; shapeSel = null;
+    changed();
+    toast((kind === 'lake' ? 'Lake' : 'River') + ' added. Drag it where you want it, and drag the white dots to reshape it');
+  }
+  function waterAction(act) {
+    var p = plan(), wb = waterSel && findWater(p, waterSel);
+    if (act === 'done' || !wb) { waterSel = null; waterDel = false; render(); return; }
+    if (act === 'delsec') { waterDel = !waterDel; render(); return; }
+    if (act === 'w-' || act === 'w+') { setRiverWidth(wb.w + (act === 'w+' ? 1 : -1)); return; }
+    if (act === 'delete') {
+      var W = p.layout.water, i = W.indexOf(wb), habs = habPolysState(p);
+      var before = shortfalls(habs, waterStats(habs, W), true);
+      W.splice(i, 1);
+      var after = shortfalls(habs, waterStats(habs, W), true), bad = Object.keys(after).filter(function (k) { return after[k] > (before[k] || 0) + 2; })[0];
+      if (bad) {
+        W.splice(i, 0, wb);
+        var H = habs.filter(function (x) { return x.seed === bad; })[0];
+        toast((H ? 'Habitat ' + H.num : 'A habitat') + ' needs this water. Shrink or move it instead, or add other water there first');
+        return;
+      }
+      waterSel = null;
+      changed(); toast('Water removed');
+    }
+  }
+  var waterDel = false;
+  // try a change to the water; undo it and say who'd be short if a habitat would run out
+  function tryWaterChange(p, apply, undo) {
+    var habs = habPolysState(p), W = p.layout.water, before = shortfalls(habs, waterStats(habs, W), true);
+    apply();
+    var after = shortfalls(habs, waterStats(habs, W), true), bad = Object.keys(after).filter(function (k) { return after[k] > (before[k] || 0) + 2; })[0];
+    if (!bad) return null;
+    undo();
+    var H = habs.filter(function (x) { return x.seed === bad; })[0];
+    return H ? 'Habitat ' + H.num : 'a habitat';
+  }
+  // which stretch of a river (between dot i and i+1) is nearest a point
+  function riverSeg(wb, at) {
+    var best = null, L = wb.line;
+    for (var i = 0; i < L.length - 1; i++) {
+      var a = { x: wb.x + L[i].x, y: wb.y + L[i].y }, b = { x: wb.x + L[i + 1].x, y: wb.y + L[i + 1].y };
+      var vx = b.x - a.x, vy = b.y - a.y, l2 = vx * vx + vy * vy, u = l2 ? Math.max(0, Math.min(1, ((at.x - a.x) * vx + (at.y - a.y) * vy) / l2)) : 0;
+      var d = Math.hypot(a.x + u * vx - at.x, a.y + u * vy - at.y);
+      if (!best || d < best.d) best = { d: d, i: i };
+    }
+    return best ? best.i : 0;
+  }
+  function tapRiver(wb, at) {
+    var p = plan(), L = wb.line, i = riverSeg(wb, at);
+    if (!waterDel) {
+      // add a bend dot where it was tapped
+      L.splice(i + 1, 0, { x: at.x - wb.x, y: at.y - wb.y });
+      wb.edited = true; changed(); return;
+    }
+    waterDel = false;
+    var W = p.layout.water, saved = JSON.parse(JSON.stringify(wb)), idx = W.indexOf(wb), extra = null;
+    var who = tryWaterChange(p, function () {
+      if (L.length <= 2) { W.splice(idx, 1); return; }
+      if (i === 0) L.shift();
+      else if (i === L.length - 2) L.pop();
+      else {
+        // a stretch from the middle: the river splits in two
+        extra = { id: 'wr' + uid(), kind: 'river', x: wb.x, y: wb.y, w: wb.w, home: null, forNeed: 0, edited: true, line: L.slice(i + 1) };
+        wb.line = L.slice(0, i + 1);
+        W.splice(idx + 1, 0, extra);
+      }
+    }, function () {
+      if (extra) W.splice(W.indexOf(extra), 1);
+      if (W.indexOf(wb) < 0) W.splice(idx, 0, wb);
+      wb.line = saved.line;
+    });
+    if (who) { render(); toast(who + ' needs that stretch of water. Move or add other water there first'); return; }
+    if (W.indexOf(wb) < 0) waterSel = null;
+    wb.edited = true; changed(); toast('Section deleted');
+  }
+  function tapRiverDot(wb, k) {
+    if (wb.kind !== 'river') return;
+    if (wb.line.length <= 2) { toast('A river needs at least 2 dots. Use Delete to remove it'); return; }
+    var saved = wb.line.slice(), who = tryWaterChange(plan(), function () { wb.line.splice(k, 1); }, function () { wb.line = saved; });
+    if (who) { toast(who + ' would be short of water'); return; }
+    wb.edited = true; changed();
+  }
+  function hasWaterEdits(p) { return !!(p.layout && p.layout.water && p.layout.water.some(function (w) { return w.edited || !w.home; })); }
+
+  // ---------- GROUND AND WATER RIDES ----------
+  // The 4x4 and steam train run on the ground; the riverboat on water. Their routes are found
+  // on a grid laid over the map: each square knows whether it's habitat, aquarium, exhibit,
+  // plaza/staff/entrance/station, path or water. Paths, water and other ground tracks can be
+  // crossed (with bridges or tunnels); exhibits never can.
+  var CELL_HAB = 1, CELL_AQUA = 2, CELL_EXH = 4, CELL_SOFT = 8, CELL_PATH = 16, CELL_WATER = 32;
+  function rideKind(t) { return t === 'boat' ? 'water' : (t === 'jeep' || t === 'train') ? 'ground' : 'air'; }
+  function rideGrid(LR) {
+    if (LR._grid) return LR._grid;
+    var R = LR.R, S = LR.S, bb = LR.bb, W = LR.water || [];
+    var wP = W.map(function (wb) { var P = waterPoly(wb); return { P: P, bb: bboxOf(P) }; });
+    var x0 = bb.x, y0 = bb.y, x1 = bb.x + bb.w, y1 = bb.y + bb.h;
+    wP.forEach(function (o) { x0 = Math.min(x0, o.bb.x0); y0 = Math.min(y0, o.bb.y0); x1 = Math.max(x1, o.bb.x1); y1 = Math.max(y1, o.bb.y1); });
+    ridesOf(plan()).forEach(function (rd) { rd.stations.forEach(function (st) { x0 = Math.min(x0, st.x); y0 = Math.min(y0, st.y); x1 = Math.max(x1, st.x); y1 = Math.max(y1, st.y); }); });
+    x0 -= 90; y0 -= 90; x1 += 90; y1 += 90;
+    var c = Math.max(2, Math.sqrt((x1 - x0) * (y1 - y0) / 90000)), nx = Math.ceil((x1 - x0) / c), ny = Math.ceil((y1 - y0) / c);
+    var F = new Uint8Array(nx * ny);
+    var G = { x0: x0, y0: y0, c: c, nx: nx, ny: ny, F: F, rules: {} };
+    G.cellOf = function (x, y) { var i = Math.floor((x - x0) / c), j = Math.floor((y - y0) / c); return (i < 0 || j < 0 || i >= nx || j >= ny) ? -1 : j * nx + i; };
+    G.xy = function (k) { return { x: x0 + (k % nx + 0.5) * c, y: y0 + (Math.floor(k / nx) + 0.5) * c }; };
+    function span(a0, a1, b0, b1, fn) {
+      var i0 = Math.max(0, Math.floor((a0 - x0) / c)), i1 = Math.min(nx - 1, Math.floor((a1 - x0) / c));
+      var j0 = Math.max(0, Math.floor((b0 - y0) / c)), j1 = Math.min(ny - 1, Math.floor((b1 - y0) / c));
+      for (var j = j0; j <= j1; j++) for (var i = i0; i <= i1; i++) fn(j * nx + i, x0 + (i + 0.5) * c, y0 + (j + 0.5) * c);
+    }
+    function poly(P, bit) { var b = bboxOf(P); span(b.x0, b.x1, b.y0, b.y1, function (k, x, y) { if (inPoly(P, x, y)) F[k] |= bit; }); }
+    function rect(cx, cy, w, h, bit) { span(cx - w / 2, cx + w / 2, cy - h / 2, cy + h / 2, function (k) { F[k] |= bit; }); }
+    function disk(cx, cy, r, bit) { span(cx - r, cx + r, cy - r, cy + r, function (k, x, y) { if (Math.hypot(x - cx, y - cy) <= r) F[k] |= bit; }); }
+    habPolysLayout(R).forEach(function (H) { poly(H.P, CELL_HAB); });
+    R.circles.forEach(function (o) {
+      if (o.type === 'aquarium') poly(outlineSamples(o.shape || defaultShape(o.seed, Math.sqrt(o.A / Math.PI)), 4).map(function (q) { return { x: o.x + q.x, y: o.y + q.y }; }), CELL_AQUA);
+      else if (o.type === 'exhibits' || o.type === 'walk') rect(o.x, o.y, o.bw, o.bd, CELL_EXH);
+      else if (o.type === 'staff') rect(o.x, o.y, S.staffW, S.staffD, CELL_SOFT);
+      else if (o.type === 'station') rect(o.x, o.y, o.w, o.d, CELL_SOFT);
+    });
+    (R.plazas || []).forEach(function (q) { rect(q.x, q.y, q.w, q.d, CELL_SOFT); });
+    R.ents.forEach(function (e) { rect(e.cx, e.cy, e.w, e.d, CELL_SOFT); });
+    var lines = chains(R.net, R.kept);
+    R.ents.forEach(function (e) { if (e.link) lines.push([[e.cx, e.cy], [e.link.x, e.link.y]]); });
+    lines.forEach(function (l) {
+      var L = l.map(function (q) { return { x: q[0], y: q[1] }; });
+      if (L.length < 2) return;
+      var sm = lineSamples(L, 8);
+      sm.forEach(function (q) { disk(q.x, q.y, S.P / 2, CELL_PATH); });
+    });
+    wP.forEach(function (o) { poly(o.P, CELL_WATER); });
+    LR._grid = G;
+    return G;
+  }
+  // distance (m) from each square to the nearest square where isSrc() is true
+  function chamfer(G, isSrc) {
+    var nx = G.nx, ny = G.ny, N = nx * ny, D = new Float32Array(N), c = G.c, d2 = c * Math.SQRT2;
+    for (var k = 0; k < N; k++) D[k] = isSrc(k) ? 0 : 1e9;
+    for (var j = 0; j < ny; j++) for (var i = 0; i < nx; i++) {
+      k = j * nx + i; var v = D[k];
+      if (i > 0) v = Math.min(v, D[k - 1] + c);
+      if (j > 0) { v = Math.min(v, D[k - nx] + c); if (i > 0) v = Math.min(v, D[k - nx - 1] + d2); if (i < nx - 1) v = Math.min(v, D[k - nx + 1] + d2); }
+      D[k] = v;
+    }
+    for (j = ny - 1; j >= 0; j--) for (i = nx - 1; i >= 0; i--) {
+      k = j * nx + i; v = D[k];
+      if (i < nx - 1) v = Math.min(v, D[k + 1] + c);
+      if (j < ny - 1) { v = Math.min(v, D[k + nx] + c); if (i < nx - 1) v = Math.min(v, D[k + nx + 1] + d2); if (i > 0) v = Math.min(v, D[k + nx - 1] + d2); }
+      D[k] = v;
+    }
+    return D;
+  }
+  // where a ride type may go: hard() = the track's centre must never be here
+  function rideRules(G, type) {
+    if (G.rules[type]) return G.rules[type];
+    var F = G.F, sp = rideSpecs[type], kind = rideKind(type), half = sp.track / 2;
+    var hardBits = type === 'train' ? (CELL_HAB | CELL_AQUA | CELL_EXH) : (CELL_AQUA | CELL_EXH);
+    var hard = kind === 'water' ? function (k) { return !(F[k] & CELL_WATER) || (F[k] & CELL_EXH); } : function (k) { return !!(F[k] & hardBits); };
+    var D = chamfer(G, hard);
+    var need = kind === 'water' ? half * 0.9 : half + 0.5; // water exactly as wide as the boat track is enough
+    var r = { kind: kind, half: half, hard: hard, D: D, pass: function (k) { return k >= 0 && D[k] >= need; } };
+    G.rules[type] = r;
+    return r;
+  }
+  // how far (m) a stretch of track goes where this ride can't (0 = fine)
+  function segViolation(G, rr, b, len) {
+    var n = Math.max(4, Math.ceil(len / 2)), bad = 0;
+    for (var s = 0; s <= n; s++) {
+      var q = bezAt(b, s / n), k = G.cellOf(q.x, q.y);
+      if (k < 0) { if (rr.kind === 'water') bad++; continue; }
+      if (rr.kind === 'water' ? rr.D[k] < rr.half * 0.6 : rr.hard(k)) bad++;
+    }
+    return bad * len / (n + 1);
+  }
+  function rideRuleFn(rd, LR) {
+    if (rideKind(rd.type) === 'air' || !LR) return null;
+    var G = rideGrid(LR), rr = rideRules(G, rd.type), sp = rideSpecs[rd.type];
+    var apart = Math.max(sp.track * 4, Math.PI * minRadius(sp) * 1.3);
+    return function (P, i) {
+      var b = segBez(P, i), v = segViolation(G, rr, b, Math.hypot(b[3].x - b[0].x, b[3].y - b[0].y) + 1);
+      if (rr.kind !== 'water') return v;
+      // a boat track mustn't come back on top of itself
+      var n = P.length, cum = [0], tot = 0;
+      for (var k = 0; k < n; k++) { tot += Math.hypot(P[(k + 1) % n].x - P[k].x, P[(k + 1) % n].y - P[k].y); cum.push(tot); }
+      for (var t = 0; t <= 4; t++) {
+        var q = bezAt(b, t / 4), sq = cum[i] + (cum[i + 1] - cum[i]) * t / 4;
+        for (var j = 0; j < n; j++) {
+          if (P[j].g || j === i) continue;
+          var mid = { x: (P[j].x + P[(j + 1) % n].x) / 2, y: (P[j].y + P[(j + 1) % n].y) / 2 }, sj = (cum[j] + cum[j + 1]) / 2, ds = Math.abs(sj - sq);
+          ds = Math.min(ds, tot - ds);
+          if (ds < apart) continue;
+          var bj = segBez(P, j);
+          for (var u = 0; u <= 4; u++) { var r2 = bezAt(bj, u / 4), dd = Math.hypot(r2.x - q.x, r2.y - q.y); if (dd < sp.track) v += (sp.track - dd); }
+        }
+      }
+      return v;
+    };
+  }
+  // A* over the grid
+  function gridRoute(G, from, to, pass, cost) {
+    var N = G.nx * G.ny, nx = G.nx, c = G.c, g = new Float32Array(N), prev = new Int32Array(N), done = new Uint8Array(N);
+    for (var k = 0; k < N; k++) { g[k] = Infinity; prev[k] = -1; }
+    var tx = to % nx, ty = Math.floor(to / nx);
+    var h = function (k) { return Math.hypot(k % nx - tx, Math.floor(k / nx) - ty) * c; };
+    var heap = [], push = function (k, f) { heap.push([f, k]); var i = heap.length - 1; while (i > 0) { var pi = (i - 1) >> 1; if (heap[pi][0] <= heap[i][0]) break; var t = heap[pi]; heap[pi] = heap[i]; heap[i] = t; i = pi; } };
+    var pop = function () { var top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; var i = 0; for (;;) { var l = 2 * i + 1, r = l + 1, m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; var t = heap[m]; heap[m] = heap[i]; heap[i] = t; i = m; } } return top; };
+    g[from] = 0; push(from, h(from));
+    var nb = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2]], guard = 0;
+    while (heap.length && guard++ < N * 3) {
+      var cur = pop()[1];
+      if (done[cur]) continue;
+      done[cur] = 1;
+      if (cur === to) break;
+      var ci = cur % nx, cj = Math.floor(cur / nx);
+      for (var a = 0; a < 8; a++) {
+        var ni = ci + nb[a][0], nj = cj + nb[a][1];
+        if (ni < 0 || nj < 0 || ni >= nx || nj >= G.ny) continue;
+        var nk = nj * nx + ni;
+        if (done[nk] || (!pass(nk) && nk !== to)) continue;
+        var ng = g[cur] + nb[a][2] * c * cost(nk);
+        if (ng < g[nk]) { g[nk] = ng; prev[nk] = cur; push(nk, ng + h(nk)); }
+      }
+    }
+    if (!done[to]) return null;
+    var out = [], k2 = to;
+    while (k2 >= 0) { out.push(k2); k2 = prev[k2]; }
+    return out.reverse();
+  }
+  // nearest square the ride may use, close to a point
+  function nearPass(G, rr, x, y, maxD) {
+    var k = G.cellOf(x, y);
+    if (k >= 0 && rr.pass(k)) return k;
+    var best = null, r = Math.ceil(maxD / G.c);
+    for (var dj = -r; dj <= r; dj++) for (var di = -r; di <= r; di++) {
+      var kk = G.cellOf(x + di * G.c, y + dj * G.c);
+      if (kk < 0 || !rr.pass(kk)) continue;
+      var d = Math.hypot(di, dj);
+      if (!best || d < best.d) best = { d: d, k: kk };
+    }
+    return best ? best.k : -1;
+  }
+  // straighten a run of squares into a few points (Douglas-Peucker), then space them out
+  function simplifyPts(pts, tol) {
+    if (pts.length < 3) return pts.slice();
+    var keep = new Uint8Array(pts.length); keep[0] = keep[pts.length - 1] = 1;
+    (function dp(a, b) {
+      var best = -1, bi = -1, A = pts[a], B = pts[b], vx = B.x - A.x, vy = B.y - A.y, l = Math.hypot(vx, vy) || 1;
+      for (var i = a + 1; i < b; i++) { var d = Math.abs((pts[i].x - A.x) * vy - (pts[i].y - A.y) * vx) / l; if (d > best) { best = d; bi = i; } }
+      if (best > tol) { keep[bi] = 1; dp(a, bi); dp(bi, b); }
+    })(0, pts.length - 1);
+    return pts.filter(function (q, i) { return keep[i]; });
+  }
+  function spacePts(pts, step) {
+    var out = [pts[0]];
+    for (var i = 1; i < pts.length; i++) {
+      var a = pts[i - 1], b = pts[i], d = Math.hypot(b.x - a.x, b.y - a.y), n = Math.floor(d / step);
+      for (var k = 1; k <= n; k++) if (d - k * step > step * 0.4) out.push({ x: a.x + (b.x - a.x) * k * step / d, y: a.y + (b.y - a.y) * k * step / d });
+      out.push(b);
+    }
+    return out;
+  }
+  // Find the route for a ground or water ride: from station to station round the loop, each
+  // leg keeping away from the legs already drawn so the way back runs in its own lane.
+  function routeRide(rd, LR) {
+    var G = rideGrid(LR), rr = rideRules(G, rd.type), sp = rideSpecs[rd.type], st = rd.stations, n = st.length, F = G.F;
+    var water = rr.kind === 'water', near = new Uint8Array(G.nx * G.ny), own = {};
+    st.forEach(function (s) { var hw = Math.max(sp.w, sp.d) / 2 + 2; for (var dy = -hw; dy <= hw; dy += G.c / 2) for (var dx = -hw; dx <= hw; dx += G.c / 2) { var k = G.cellOf(s.x + dx, s.y + dy); if (k >= 0) own[k] = 1; } });
+    var cost = function (k) {
+      var v = 1, f = F[k];
+      if ((f & CELL_SOFT) && !own[k]) v += 40;           // keep off plazas, staff areas, entrances and other stations
+      if (!water && (f & CELL_PATH)) v += 3;              // cross paths only where needed
+      if (!water && (f & CELL_WATER)) v += 1.5;
+      if (near[k]) v += water ? 60 : 8;                   // the way back runs in its own lane
+      return v;
+    };
+    function markNear(path) {
+      var r = Math.ceil((sp.track * 1.6) / G.c);
+      path.forEach(function (k) { var i = k % G.nx, j = Math.floor(k / G.nx); for (var dj = -r; dj <= r; dj++) for (var di = -r; di <= r; di++) { var ii = i + di, jj = j + dj; if (ii >= 0 && jj >= 0 && ii < G.nx && jj < G.ny && Math.hypot(di, dj) <= r) near[jj * G.nx + ii] = 1; } });
+    }
+    function freeNear(s) { var r = Math.ceil((Math.max(sp.w, sp.d) + sp.track * 3) / G.c), k0 = G.cellOf(s.x, s.y); if (k0 < 0) return; var i = k0 % G.nx, j = Math.floor(k0 / G.nx); for (var dj = -r; dj <= r; dj++) for (var di = -r; di <= r; di++) { var kk = (j + dj) * G.nx + (i + di); if (kk >= 0 && kk < near.length) near[kk] = 0; } }
+    var order = n > 1 ? stationOrder(st) : [0], stops = order.map(function (i) { return st[i]; });
+    if (n === 1) {
+      // one station: go out to a turning point and back
+      var s0 = st[0], bestW = null;
+      for (var a = 0; a < 16; a++) {
+        var ang = a * Math.PI / 8, dist = Math.max(45, minRadius(sp) * 5), wx = s0.x + Math.cos(ang) * dist, wy = s0.y + Math.sin(ang) * dist, kk = G.cellOf(wx, wy);
+        if (kk < 0 || !rr.pass(kk)) continue;
+        var sc = (F[kk] & CELL_SOFT ? 5 : 0) + (water ? -rr.D[kk] : 0);
+        if (!bestW || sc < bestW.sc) bestW = { sc: sc, x: wx, y: wy };
+      }
+      if (bestW) stops = [s0, { x: bestW.x, y: bestW.y, turn: true }];
+    }
+    // the track runs straight through each station: in at one end, out of the other
+    var lead = Math.max(6, sp.minLen), m = stops.length;
+    stops.forEach(function (s, i) {
+      if (!s.id) { s.ein = s.eout = { x: s.x, y: s.y }; return; }
+      var pv = stops[(i - 1 + m) % m], nx2 = stops[(i + 1) % m], ux = nx2.x - pv.x, uy = nx2.y - pv.y;
+      if (m === 1 || Math.hypot(ux, uy) < 1) { ux = 1; uy = 0; }
+      if (m === 2 && !nx2.id) { var tx = nx2.x - s.x, ty = nx2.y - s.y; ux = -ty; uy = tx; } // one station and a turning point: leave sideways
+      else if (m === 2) { ux = stops[1].x - stops[0].x; uy = stops[1].y - stops[0].y; } // two stations: both face along the line between them
+      var ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+      var off = sp.w / 2 + lead, best = null;
+      [1, -1].forEach(function (sg) {
+        var a = { x: s.x - ux * off * sg, y: s.y - uy * off * sg }, b = { x: s.x + ux * off * sg, y: s.y + uy * off * sg };
+        var ka = G.cellOf(a.x, a.y), kb = G.cellOf(b.x, b.y), sc = (ka >= 0 && rr.pass(ka) ? 0 : 50) + (kb >= 0 && rr.pass(kb) ? 0 : 50) +
+          Math.hypot(a.x - pv.x, a.y - pv.y) + Math.hypot(b.x - nx2.x, b.y - nx2.y);
+        if (!best || sc < best.sc) best = { sc: sc, a: a, b: b };
+      });
+      s.ein = best.a; s.eout = best.b;
+    });
+    var legs = [], failed = [];
+    for (var li = 0; li < stops.length; li++) {
+      var A = stops[li].eout, B = stops[(li + 1) % stops.length].ein;
+      if (stops.length === 1) break;
+      var ka = nearPass(G, rr, A.x, A.y, 40), kb = nearPass(G, rr, B.x, B.y, 40);
+      var path = ka >= 0 && kb >= 0 ? (freeNear(A), freeNear(B), gridRoute(G, ka, kb, rr.pass, cost)) : null;
+      if (!path) { failed.push([A, B]); legs.push([]); continue; }
+      markNear(path);
+      var pts = simplifyPts([A].concat(path.map(function (k) { return G.xy(k); }), [B]), G.c * 0.9);
+      legs.push(spacePts(pts, Math.max(12, Math.min(sp.maxLen || 30, 30))));
+    }
+    var T = [];
+    stops.forEach(function (s, i) {
+      if (s.id) { T.push({ x: s.ein.x, y: s.ein.y }); T.push({ s: s.id }); T.push({ x: s.eout.x, y: s.eout.y }); }
+      else T.push({ x: s.x, y: s.y });
+      var L = legs[i] || [];
+      L.slice(1, -1).forEach(function (q) { T.push({ x: q.x, y: q.y }); });
+    });
+    // tidy up the very first and last points of each leg (they sit on the stations)
+    rd.track = T.length >= 3 ? T : null;
+    if (!rd.track) {
+      // too few points for a loop: fall back to the simple loop and let the red show the problem
+      linkAir(rd, zooCentre(LR));
+    }
+    if (failed.length) rd.linkNote = water ? 'Couldn’t find a way along the water between some stations. Check each station sits at the water’s edge, and that the water joins up and is at least ' + sp.track + ' m wide.' :
+      'Couldn’t find a way between some stations without going through ' + (rd.type === 'train' ? 'habitats, aquariums or exhibits' : 'aquariums or exhibits') + '. A station may be boxed in. Try moving it.';
+    var rf = rideRuleFn(rd, LR);
+    for (var pass2 = 0; pass2 < 3 && rd.track; pass2++) if (!correctTrack(rd, rf).length) break;
+    if (water && stops.length >= 2 && stops.every(function (q) { return q.id; })) {
+      var first = { track: rd.track, note: rd.linkNote, score: boatScore(rd, LR) };
+      if (first.score > 0 && laneRoute(rd, LR, G, rr, sp, stops, own)) {
+        for (pass2 = 0; pass2 < 3 && rd.track; pass2++) if (!correctTrack(rd, rf).length) break;
+        var second = boatScore(rd, LR);
+        if (second < first.score) delete rd.linkNote; else { rd.track = first.track; rd.linkNote = first.note; }
+      }
+    }
+  }
+  // how much is wrong with a boat track (red stretches, plus running on top of itself)
+  function boatScore(rd, LR) {
+    if (!rd.track) return 1e9;
+    var P = trackPts(rd), segs = trackGeo(P, rideSpecs[rd.type]), chk = rideCheck(rd, LR, segs), sc = 0;
+    segs.forEach(function (g) { if (!g.gap && (g.tight || chk.viol[g.i])) sc += 1 + (chk.viol[g.i] || 0); });
+    return sc + (chk.selfClose ? 50 : 0);
+  }
+  // Boat out and back: one lane through the stations, keeping to the middle of the water, and
+  // the way back parallel to it on whichever side has room, turning in a loop at each end.
+  function laneRoute(rd, LR, G, rr, sp, stops, own) {
+    var F = G.F, d = sp.track + 1, minR = minRadius(sp), out = [];
+    var centre = function (k) { var v = 1 + Math.max(0, 8 - rr.D[k]) * 0.6; if ((F[k] & CELL_SOFT) && !own[k]) v += 40; return v; };
+    // the middle of the water between stations; the stations themselves stay where they are
+    for (var i = 0; i < stops.length; i++) {
+      var s = stops[i];
+      out.push({ x: s.ein.x, y: s.ein.y, st: 1 }, { x: s.x, y: s.y, s: s.id, st: 1 }, { x: s.eout.x, y: s.eout.y, st: 1 });
+      if (i === stops.length - 1) break;
+      var A = s.eout, B = stops[i + 1].ein, ka = nearPass(G, rr, A.x, A.y, 30), kb = nearPass(G, rr, B.x, B.y, 30);
+      var path = ka >= 0 && kb >= 0 ? gridRoute(G, ka, kb, rr.pass, centre) : null;
+      if (!path) return false;
+      spacePts(simplifyPts([A].concat(path.map(function (k) { return G.xy(k); }), [B]), G.c * 0.9), 14).slice(1, -1).forEach(function (q) { out.push({ x: q.x, y: q.y }); });
+    }
+    // carry on past each end station to the nearest water wide enough to turn round in
+    var rTurn = Math.max(minR * 1.25, d / 2), needD = rTurn * 1.6 + sp.track / 2 + 0.5, used = new Uint8Array(G.nx * G.ny);
+    out.forEach(function (q, i) {
+      if (i === 0) return;
+      var a = out[i - 1], L2 = Math.hypot(q.x - a.x, q.y - a.y), steps = Math.max(1, Math.ceil(L2 / G.c));
+      for (var t = 0; t <= steps; t++) { var x = a.x + (q.x - a.x) * t / steps, y = a.y + (q.y - a.y) * t / steps, r = Math.ceil(5 / G.c), k0 = G.cellOf(x, y); if (k0 < 0) continue; var ci = k0 % G.nx, cj = Math.floor(k0 / G.nx); for (var dj = -r; dj <= r; dj++) for (var di = -r; di <= r; di++) { var kk = (cj + dj) * G.nx + ci + di; if (kk >= 0 && kk < used.length) used[kk] = 1; } }
+    });
+    function turnSpot(from) {
+      var k0 = nearPass(G, rr, from.x, from.y, 20);
+      if (k0 < 0) return null;
+      var prev = new Int32Array(G.nx * G.ny).fill(-2), q = [k0], h = 0; prev[k0] = -1;
+      var limit = Math.ceil(220 / G.c) * Math.ceil(220 / G.c);
+      while (h < q.length && h < limit) {
+        var k = q[h++];
+        if (rr.D[k] >= needD) {
+          var path = []; for (var z = k; z >= 0; z = prev[z]) path.push(G.xy(z)); path.reverse();
+          // then on to the roomiest spot nearby, so the whole turn fits in the water
+          for (var climb = 0; climb < 40; climb++) {
+            var bi = -1, bD = rr.D[k], ki = k % G.nx, kj = Math.floor(k / G.nx);
+            for (var cj = -1; cj <= 1; cj++) for (var cI = -1; cI <= 1; cI++) { var ck = (kj + cj) * G.nx + ki + cI; if (ck >= 0 && ck < rr.D.length && rr.D[ck] > bD) { bD = rr.D[ck]; bi = ck; } }
+            if (bi < 0) break;
+            k = bi; path.push(G.xy(k));
+          }
+          return path;
+        }
+        var i2 = k % G.nx, j2 = Math.floor(k / G.nx);
+        for (var dj2 = -1; dj2 <= 1; dj2++) for (var di2 = -1; di2 <= 1; di2++) {
+          var ni = i2 + di2, nj = j2 + dj2, nk = nj * G.nx + ni;
+          if ((!di2 && !dj2) || ni < 0 || nj < 0 || ni >= G.nx || nj >= G.ny || prev[nk] !== -2 || !rr.pass(nk)) continue;
+          if (used[nk] && Math.hypot(G.xy(nk).x - from.x, G.xy(nk).y - from.y) > 8) continue; // not back along the river
+          prev[nk] = k; q.push(nk);
+        }
+      }
+      return null;
+    }
+    var spotEnd = turnSpot(out[out.length - 1]), spotStart = turnSpot(out[0]);
+    var trimTo = function (path) { // stop one turning radius short of the turning spot
+      var pts = simplifyPts(path, G.c * 0.9), end = pts[pts.length - 1], keep = [];
+      pts.forEach(function (q) { if (Math.hypot(q.x - end.x, q.y - end.y) > rTurn) keep.push(q); });
+      return spacePts(keep.length ? keep : [pts[0]], 12).slice(1);
+    };
+    if (spotEnd && spotEnd.length > 2) trimTo(spotEnd).forEach(function (q) { out.push({ x: q.x, y: q.y }); });
+    if (spotStart && spotStart.length > 2) trimTo(spotStart).forEach(function (q) { out.unshift({ x: q.x, y: q.y }); });
+    var cEnd = spotEnd && spotEnd.length > 2 ? spotEnd[spotEnd.length - 1] : null, cStart = spotStart && spotStart.length > 2 ? spotStart[spotStart.length - 1] : null;
+    var norm = function (i) { var a = out[Math.max(0, i - 1)], b = out[Math.min(out.length - 1, i + 1)], tx = b.x - a.x, ty = b.y - a.y, l = Math.hypot(tx, ty) || 1; return { x: -ty / l, y: tx / l }; };
+    var N = out.map(function (q, i) { return norm(i); });
+    // which side of the middle are the stations on? the outward lane keeps to that side
+    var side = 0;
+    out.forEach(function (q, i) {
+      if (!q.s) return;
+      var near = null;
+      out.forEach(function (c2) { if (c2.st) return; var dd = Math.hypot(c2.x - q.x, c2.y - q.y); if (!near || dd < near.d) near = { d: dd, c: c2 }; });
+      if (near) side += (q.x - near.c.x) * N[i].x + (q.y - near.c.y) * N[i].y;
+    });
+    var best = null;
+    (side >= 0 ? [1, -1] : [-1, 1]).forEach(function (sg, pref) {
+      var lane1 = out.map(function (q, i) { return q.st ? { x: q.x, y: q.y, s: q.s } : { x: q.x + N[i].x * d / 2 * sg, y: q.y + N[i].y * d / 2 * sg }; });
+      var lane2 = out.map(function (q, i) { var k2 = q.st ? d : d / 2; return { x: q.x - N[i].x * k2 * sg, y: q.y - N[i].y * k2 * sg }; });
+      var ok = lane1.concat(lane2).filter(function (q) { var k = G.cellOf(q.x, q.y); return k >= 0 && rr.pass(k); }).length - pref * 0.5;
+      if (!best || ok > best.ok) best = { ok: ok, out: lane1, lane: lane2 };
+    });
+    out = best.out;
+    // turning loops at each end: out past the end station, round the far side, onto the other lane
+    function turn(from, to, dirx, diry, C) {
+      // racket-shaped turn: straight on, round a full-size half circle on the far lane's side,
+      // then ease back across into the other lane
+      var R = rTurn, ux = dirx, uy = diry, nx0 = to.x - from.x, ny0 = to.y - from.y, dd = Math.hypot(nx0, ny0) || 1;
+      var nX = nx0 / dd, nY = ny0 / dd, a = R * 0.5, pts = [];
+      var t1 = { x: from.x + ux * a, y: from.y + uy * a }, cx = t1.x + nX * R, cy = t1.y + nY * R;
+      if (C) {
+        // centre the turn on the roomiest water; head for it from the end of the lane
+        cx = C.x; cy = C.y; var vx = cx - (from.x + to.x) / 2, vy = cy - (from.y + to.y) / 2, vl = Math.hypot(vx, vy);
+        if (vl > 1) { ux = vx / vl; uy = vy / vl; nX = -uy; nY = ux; if ((to.x - from.x) * nX + (to.y - from.y) * nY < 0) { nX = -nX; nY = -nY; } }
+        t1 = { x: cx - nX * R, y: cy - nY * R };
+      }
+      pts.push(t1);
+      for (var k = 1; k < 8; k++) {
+        var th = Math.PI * k / 8, ca = Math.cos(th), sa = Math.sin(th); // from -n, through u, to +n
+        pts.push({ x: cx - nX * R * ca + ux * R * sa, y: cy - nY * R * ca + uy * R * sa });
+      }
+      var t2 = { x: cx + nX * R, y: cy + nY * R };
+      pts.push(t2, { x: t2.x - ux * R * 0.8 - nX * (2 * R - dd) * 0.5, y: t2.y - uy * R * 0.8 - nY * (2 * R - dd) * 0.5 });
+      return pts;
+    }
+    var L = best.lane, nO = out.length;
+    var ue = { x: out[nO - 1].x - out[nO - 2].x, y: out[nO - 1].y - out[nO - 2].y }, ul = Math.hypot(ue.x, ue.y) || 1;
+    var us = { x: out[0].x - out[1].x, y: out[0].y - out[1].y }, ul2 = Math.hypot(us.x, us.y) || 1;
+    var T = [];
+    out.forEach(function (q) { T.push(q.s ? { s: q.s } : { x: q.x, y: q.y }); });
+    turn(out[nO - 1], L[nO - 1], ue.x / ul, ue.y / ul, cEnd).forEach(function (q) { T.push(q); });
+    L.slice().reverse().forEach(function (q) { T.push({ x: q.x, y: q.y }); });
+    turn(L[0], out[0], us.x / ul2, us.y / ul2, cStart).forEach(function (q) { T.push(q); });
+    rd.track = T;
+    return true;
+  }
+  // what's wrong (or worth knowing) about a ride's track, for the map and the ride list
+  function rideCheck(rd, LR, segs) {
+    var out = { viol: {}, bridges: false, selfClose: false, offWater: [] };
+    var kind = rideKind(rd.type);
+    if (kind === 'air' || !LR || !rd.track) return out;
+    var G = rideGrid(LR), rr = rideRules(G, rd.type), F = G.F, P = trackPts(rd), samples = [];
+    segs.forEach(function (g) {
+      if (g.gap) return;
+      var v = segViolation(G, rr, g.b, g.len);
+      if (v > 0) out.viol[g.i] = v;
+      var n = Math.max(4, Math.ceil(g.len / 3));
+      for (var s = 0; s <= n; s++) {
+        var q = bezAt(g.b, s / n), k = G.cellOf(q.x, q.y);
+        samples.push({ x: q.x, y: q.y, i: g.i, t: s / n, len: g.len });
+        if (kind === 'ground' && k >= 0 && (F[k] & (CELL_PATH | CELL_WATER))) out.bridges = true;
+      }
+    });
+    if (kind === 'ground') {
+      // crossing another ground ride needs a bridge or tunnel too
+      ridesOf(plan()).forEach(function (o) {
+        if (o === rd || rideKind(o.type) !== 'ground' || !o.track || out.bridges) return;
+        var Q = trackPts(o);
+        trackGeo(Q, rideSpecs[o.type]).forEach(function (g) { if (g.gap || out.bridges) return; for (var s = 0; s <= 6; s++) { var q = bezAt(g.b, s / 6); if (samples.some(function (m) { return Math.hypot(m.x - q.x, m.y - q.y) < 4; })) { out.bridges = true; return; } } });
+      });
+    }
+    if (kind === 'water') {
+      // boat lanes can't cross or run on top of each other: two bits of track that are far apart
+      // along the track mustn't come closer than the track's width
+      var spB = rideSpecs[rd.type], acc = 0, lastI = -1, total = 0;
+      segs.forEach(function (g) { if (!g.gap) total += g.len; });
+      samples.forEach(function (m2) { if (m2.i !== lastI) { if (lastI >= 0) acc += segs.filter(function (g) { return g.i === lastI; })[0].len; lastI = m2.i; } m2.s = acc + m2.t * m2.len; });
+      var apart = Math.max(spB.track * 4, Math.PI * minRadius(spB) * 1.3);
+      for (var a = 0; a < samples.length && !out.selfClose; a++) for (var b = a + 1; b < samples.length; b++) {
+        var ds = Math.abs(samples[a].s - samples[b].s); ds = Math.min(ds, total - ds);
+        if (ds < apart) continue;
+        if (Math.hypot(samples[a].x - samples[b].x, samples[a].y - samples[b].y) < spB.track * 0.95) { out.selfClose = true; out.viol[samples[a].i] = out.viol[samples[a].i] || 1; break; }
+      }
+      rd.stations.forEach(function (s) { var k = G.cellOf(s.x, s.y); if (k < 0 || !(F[k] & CELL_WATER)) out.offWater.push(s.id); });
+    }
+    return out;
+  }
+
+  // ---------- handles drawn at screen size ----------
+  // Dots and grips are drawn in screen pixels inside a group that fixHandles() scales,
+  // so they stay the same size on screen however far the map is zoomed.
+  function hpt(x, y, inner) { return '<g class="hs" data-x="' + f1(x) + '" data-y="' + f1(y) + '" transform="translate(' + f1(x) + ' ' + f1(y) + ')">' + inner + '</g>'; }
+  function dotSvg(fill, stroke, r) { return '<circle r="' + (r || 4.5) + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.6"/>'; }
+  // a move grip just outside a shape: P = the shape's outline, avoid = things to keep clear of
+  function gripSvg(kind, id, P, avoid, label) {
+    var cx = 0, cy = 0;
+    P.forEach(function (q) { cx += q.x / P.length; cy += q.y / P.length; });
+    var best = null;
+    for (var k = 0; k < 8; k++) {
+      var a = -Math.PI / 4 + k * Math.PI / 4, dx = Math.cos(a), dy = Math.sin(a), edge = null;
+      P.forEach(function (q) { var pr = (q.x - cx) * dx + (q.y - cy) * dy; if (!edge || pr > edge.pr) edge = { pr: pr, x: q.x, y: q.y }; });
+      var tx = edge.x + dx * 20, ty = edge.y + dy * 20, score = k === 0 ? -1 : 0;
+      avoid.forEach(function (c) { var d = Math.hypot(c.x - tx, c.y - ty) - c.r; if (d < 12) score += 12 - d; });
+      if (!best || score < best.score) best = { score: score, x: edge.x, y: edge.y, dx: dx, dy: dy };
+    }
+    var gx = best.dx * 24, gy = best.dy * 24;
+    return '<g class="drag grip" data-drag="' + kind + '|' + esc(id) + '"><title>' + esc(label) + '</title>' + hpt(best.x, best.y,
+      '<line x1="0" y1="0" x2="' + f1(gx) + '" y2="' + f1(gy) + '" stroke="#22301f" stroke-width="1.4"/>' +
+      '<circle cx="' + f1(gx) + '" cy="' + f1(gy) + '" r="9" fill="#22301f" stroke="#fff" stroke-width="1.5"/>' +
+      '<path transform="translate(' + f1(gx) + ' ' + f1(gy) + ')" d="M0 -6L-2.2 -3.4H2.2ZM0 6L-2.2 3.4H2.2ZM-6 0L-3.4 -2.2V2.2ZM6 0L3.4 -2.2V2.2ZM-0.7 -3.6H0.7V3.6H-0.7ZM-3.6 -0.7H3.6V0.7H-3.6Z" fill="#fff"/>') + '</g>';
+  }
+  // size the handles and the scale bar for the current zoom
+  function fixHandles(svg) {
+    var m = svg && svg.getScreenCTM && svg.getScreenCTM();
+    if (!m || !m.a) return;
+    var u = 1 / m.a;
+    svg.querySelectorAll('.hs').forEach(function (g) { g.setAttribute('transform', 'translate(' + g.getAttribute('data-x') + ' ' + g.getAttribute('data-y') + ') scale(' + u.toFixed(4) + ')'); });
+    var bar = svg.querySelector('#zbar'), vb = svg.viewBox.baseVal;
+    if (bar && vb) {
+      var want = 90 * u, len = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500].filter(function (v) { return v <= want; }).pop() || 1;
+      var x = vb.x + 12 * u, y = vb.y + vb.height - 12 * u;
+      bar.innerHTML = '<rect x="' + x.toFixed(2) + '" y="' + (y - 1.5 * u).toFixed(2) + '" width="' + len + '" height="' + (3 * u).toFixed(2) + '" fill="#22301f"/>' +
+        '<text x="' + (x + len + 5 * u).toFixed(2) + '" y="' + y.toFixed(2) + '" font-size="' + (11 * u).toFixed(2) + '" fill="#22301f" dominant-baseline="central">' + len + ' m</text>';
+    }
   }
 
   // ---------- drawing ----------
@@ -1704,8 +2658,20 @@
     var p = plan(), LR = computeLayout(units, themeNames, p), R = LR.R, S = LR.S, bb = LR.bb;
     var free = true;
     if (editRide && !findRide(p, editRide)) { editRide = null; delMode = false; }
+    // water, and how it's shared between habitats
+    var W = LR.water || [], habPolys = habPolysLayout(R), wst = waterStats(habPolys, W);
+    lastWater = { stats: wst, W: W, habs: habPolys };
+    if (waterSel && !W.some(function (w) { return w.id === waterSel; })) waterSel = null;
+    var wPolys = W.map(function (wb) { return { wb: wb, P: waterPoly(wb) }; });
+    wPolys.forEach(function (o) { var b = bboxOf(o.P); var x0 = Math.min(bb.x, b.x0 - 6), y0 = Math.min(bb.y, b.y0 - 6), x1 = Math.max(bb.x + bb.w, b.x1 + 6), y1 = Math.max(bb.y + bb.h, b.y1 + 6); bb = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }; });
     // ride tracks (worked out first so the map can be made big enough for them)
-    var tracks = ridesOf(p).map(function (rd) { var P = trackPts(rd); return { rd: rd, sp: rideSpecs[rd.type], P: P, segs: trackGeo(P, rideSpecs[rd.type]), ang: stationAngles(rd) }; });
+    rideChecks = {};
+    var tracks = ridesOf(p).map(function (rd) {
+      var P = trackPts(rd), segs = trackGeo(P, rideSpecs[rd.type]), chk = rideCheck(rd, LR, segs);
+      segs.forEach(function (g) { g.viol = chk.viol[g.i] || 0; g.red = !g.gap && (g.tight || g.viol > 0); });
+      rideChecks[rd.id] = { segs: segs, chk: chk };
+      return { rd: rd, sp: rideSpecs[rd.type], P: P, segs: segs, chk: chk, ang: stationAngles(rd) };
+    });
     tracks.forEach(function (t) {
       t.segs.forEach(function (g) {
         [g.b[0], g.b[1], g.b[2], g.b[3]].forEach(function (q) {
@@ -1717,11 +2683,13 @@
     var pad = 10, vb = [bb.x - pad, bb.y - pad, bb.w + 2 * pad, bb.h + 2 * pad + 20];
     var colorOf = {};
     themeNames.forEach(function (t, i) { colorOf[t] = THEME_COLORS[i % THEME_COLORS.length]; });
-    var svg = '<svg class="zoo-map" viewBox="' + vb.map(f1).join(' ') + '" role="img" aria-label="Layout concept for ' + esc(p.name) + '" xmlns="http://www.w3.org/2000/svg">';
+    var svg = '<svg class="zoo-map" data-vb="' + vb.map(f1).join(' ') + '" viewBox="' + vb.map(f1).join(' ') + '" role="img" aria-label="Layout concept for ' + esc(p.name) + '" xmlns="http://www.w3.org/2000/svg">';
     svg += '<rect x="' + f1(vb[0]) + '" y="' + f1(vb[1]) + '" width="' + f1(vb[2]) + '" height="' + f1(vb[3]) + '" fill="#f7f3ea"/>';
+    if (wPolys.length) svg += '<defs><clipPath id="zoo-water">' + wPolys.map(function (o) { return '<path d="' + polyD(o.P) + '"/>'; }).join('') + '</clipPath></defs>';
+    var labelSvg = '';
     function shape(c, grow, fill, extraAttr) {
       if (c.shape) return '<path d="' + outlineD(c.x, c.y, c.shape, grow) + '" fill="' + fill + '"' + (extraAttr || '') + '/>';
-      if (free) return '<path d="' + blob({ x: c.x, y: c.y, r: c.r + grow, seed: c.seed }, 1) + '" fill="' + fill + '"' + (extraAttr || '') + '/>';
+      if (free) return '<path d="' + blob({ x: c.x, y: c.y, r: (c.r0 || c.r) + grow, seed: c.seed }, 1) + '" fill="' + fill + '"' + (extraAttr || '') + '/>';
       var s = Math.sqrt(Math.PI) * (c.r + grow);
       return '<rect x="' + f1(c.x - s / 2) + '" y="' + f1(c.y - s / 2) + '" width="' + f1(s) + '" height="' + f1(s) + '" rx="' + f1(Math.min(6, s / 6)) + '" fill="' + fill + '"' + (extraAttr || '') + '/>';
     }
@@ -1732,7 +2700,7 @@
     var lines = chains(R.net, R.kept);
     R.ents.forEach(function (e) { if (e.link) lines.push([[e.cx, e.cy], [e.link.x, e.link.y]]); });
     // every ride station gets a short path to the nearest path
-    R.circles.forEach(function (c) { if (c.type !== 'station') return; var nd = nearestPathNode(R, c.x, c.y); if (nd) lines.push([[c.x, c.y], [nd.x, nd.y]]); });
+    R.circles.forEach(function (c) { if (c.type !== 'station' || c.ride.hidden) return; var nd = nearestPathNode(R, c.x, c.y, c.inHab); if (nd) lines.push([[c.x, c.y], [nd.x, nd.y]]); });
     lines.forEach(function (l) {
       var d = free ? smoothPath(l, false) : 'M' + l.map(function (q) { return f1(q[0]) + ' ' + f1(q[1]); }).join('L');
       svg += '<path d="' + d + '" fill="none" stroke="#d9c79e" stroke-width="' + S.P + '" stroke-linecap="round" stroke-linejoin="round"/>';
@@ -1753,28 +2721,51 @@
     R.circles.forEach(function (c) {
       if (c.type === 'station' || c.type === 'part') return;
       var g = '<g class="drag" data-drag="c|' + esc(c.seed) + '"><title>' + esc(c.title || '') + (c.type === 'staff' ? ' (drag to move, tap to remove)' : c.type === 'habitat' || c.type === 'aquarium' ? ' (drag to move, tap to change its shape)' : ' (drag to move)') + '</title>';
-      if (c.type === 'habitat') g += shape(c, 0, colorOf[c.theme], ' stroke="#4f5f47" stroke-width="0.9" data-shape="' + esc(c.seed) + '"') + label(c, c.short, '#1f2b1c');
+      if (c.type === 'habitat') { g += shape(c, 0, colorOf[c.theme], ' stroke="#4f5f47" stroke-width="0.9" data-shape="' + esc(c.seed) + '"'); labelSvg += label(c, c.short, '#1f2b1c'); }
       else if (c.type === 'aquarium') {
         g += shape(c, 0, '#9ccbe3', ' stroke="#2f6680" stroke-width="1.1" data-shape="' + esc(c.seed) + '"');
         if (c.r > c.D) g += '<line x1="' + f1(c.x - c.r * 0.8) + '" y1="' + f1(c.y) + '" x2="' + f1(c.x + c.r * 0.8) + '" y2="' + f1(c.y) + '" stroke="#d9c79e" stroke-width="' + S.P + '" stroke-linecap="round"/>';
-        g += label(c, c.short, '#123445');
+        labelSvg += label(c, c.short, '#123445');
       }
       else if (c.type === 'walk') g += rectFor(c, c.bw, c.bd, colorOf[c.theme], '#4f5f47', ' stroke-dasharray="3 2"') + label(c, c.short, '#1f2b1c');
       else if (c.type === 'exhibits') g += rectFor(c, c.bw, c.bd, '#ece6d8', '#8a826f', '') + label(c, c.count + (c.count === 1 ? ' exhibit' : ' exhibits'), '#4a4436');
       else if (c.type === 'staff') g += box(c, S.staffW, S.staffD, '#9b8db3', '#6c5e85', 'Staff', '#fff');
       svg += g + '</g>';
     });
+    // water: edges first, then fills on top, so overlapping water reads as one
+    wPolys.forEach(function (o) { svg += '<path d="' + polyD(o.P) + '" fill="none" stroke="' + WATER_EDGE + '" stroke-width="1.8" stroke-linejoin="round"/>'; });
+    wPolys.forEach(function (o) {
+      var r = wst.body[o.wb.id] || { total: 0, by: {} }, where = Object.keys(r.by).map(function (sd) { var hx = habPolys.filter(function (x) { return x.seed === sd; })[0]; return hx ? fmt(r.by[sd]) + ' m² in Habitat ' + hx.num : ''; }).filter(Boolean);
+      var open = r.total - Object.keys(r.by).reduce(function (a, k) { return a + r.by[k]; }, 0);
+      if (open > 4) where.push(fmt(open) + ' m² open water');
+      svg += '<g class="drag water" data-drag="w|' + esc(o.wb.id) + '"><title>' + (o.wb.kind === 'river' ? 'River' : 'Lake') + ' · ' + fmt(waterArea(o.wb)) + ' m²' + (where.length ? ': ' + where.join(', ') : '') + ' (drag to move, tap to reshape)</title>' +
+        '<path data-water="' + esc(o.wb.id) + '" d="' + polyD(o.P) + '" fill="' + WATER_FILL + '"/>' +
+        (o.wb.kind !== 'river' && waterArea(o.wb) < 400 ? hpt(o.wb.x, o.wb.y, '<circle r="8" fill="transparent"/>') : '') + '</g>';
+    });
+    if (wPolys.length) {
+      // habitat edges across water (where the barrier would go), and paths over water as bridges
+      habPolys.forEach(function (H) { svg += '<path d="' + polyD(H.P) + '" fill="none" stroke="#3f4f38" stroke-width="1.1" stroke-dasharray="2.4 1.8" clip-path="url(#zoo-water)" pointer-events="none"/>'; });
+      lines.forEach(function (l) {
+        var d = smoothPath(l, false);
+        svg += '<path d="' + d + '" fill="none" stroke="#8b7a55" stroke-width="' + (S.P + 2.4) + '" stroke-linecap="butt" clip-path="url(#zoo-water)" pointer-events="none"/>' +
+          '<path d="' + d + '" fill="none" stroke="#d9c79e" stroke-width="' + S.P + '" stroke-linecap="round" clip-path="url(#zoo-water)" pointer-events="none"/>';
+      });
+    }
+    svg += '<g pointer-events="none">' + labelSvg + '</g>';
     R.plazas.forEach(function (pz, i) {
       svg += '<g class="drag" data-drag="p|' + esc(pz.id || ('auto' + i)) + '"><title>Guest plaza: 2 food, 2 drink, gift shop, toilet (drag to move' + (pz.mine ? ', tap to remove' : '') + ')</title>' + box(pz, S.plazaW, S.plazaD, '#f0b46a', '#b97a2e', 'Plaza', '#4a2f0c') + '</g>';
     });
     // ride tracks go over everything (gondolas and monorails run overhead)
     tracks.forEach(function (t) {
       var col = t.rd.color, editing = editRide === t.rd.id;
+      if (t.rd.hidden) return;
       t.segs.forEach(function (g) {
         if (g.gap) return;
-        svg += '<path d="' + g.d + '" fill="none" stroke="' + (g.tight ? TIGHT_COLOR : col) + '" stroke-width="' + f1(t.sp.track + (editing ? 1 : 0)) + '" stroke-linecap="round"/>' +
+        svg += '<path d="' + g.d + '" fill="none" stroke="' + (g.red ? TIGHT_COLOR : col) + '" stroke-width="' + f1(t.sp.track + (editing ? 1 : 0)) + '" stroke-linecap="round"/>' +
           '<path d="' + g.d + '" fill="none" stroke="#fff" stroke-opacity="0.85" stroke-width="0.7" stroke-dasharray="3 3"/>';
       });
+      // a red ring round each tight bend, so even a tiny one shows
+      t.segs.forEach(function (g) { if (g.red) { var at = g.tight ? g.at : bezAt(g.b, 0.5); svg += hpt(at.x, at.y, '<circle r="10" fill="none" stroke="' + TIGHT_COLOR + '" stroke-width="2.2" pointer-events="none"/>'); } });
       // wide invisible strokes, so the track is easy to tap
       t.segs.forEach(function (g) {
         if (g.gap) return;
@@ -1782,7 +2773,7 @@
       });
     });
     R.circles.forEach(function (c) {
-      if (c.type !== 'station') return;
+      if (c.type !== 'station' || c.ride.hidden) return;
       var rd = c.ride, t = tracks.filter(function (x) { return x.rd === rd; })[0], ang = t && t.ang[c.seed] !== undefined ? t.ang[c.seed] : 0;
       svg += '<g class="drag" data-drag="c|' + esc(c.seed) + '"><title>' + esc(rd.name) + ' station (drag to move, tap to remove)</title>' +
         '<rect x="' + f1(c.x - c.w / 2) + '" y="' + f1(c.y - c.d / 2) + '" width="' + f1(c.w) + '" height="' + f1(c.d) + '" rx="1.5" fill="' + rd.color + '" stroke="#fff" stroke-width="0.9" transform="rotate(' + f1(ang) + ' ' + f1(c.x) + ' ' + f1(c.y) + ')"/>' +
@@ -1790,15 +2781,26 @@
     });
     // bend points of the track being edited
     tracks.forEach(function (t) {
-      if (editRide !== t.rd.id) return;
+      if (editRide !== t.rd.id || t.rd.hidden) return;
       var n = t.P.length;
       t.P.forEach(function (q, i) {
         if (q.s) return;
         var loose = q.g || t.P[(i - 1 + n) % n].g;
         svg += '<g class="drag bend" data-drag="b|' + esc(t.rd.id) + '|' + i + '"><title>' + (loose ? 'Loose end (drag to move, tap to join the gap)' : 'Bend point (drag to move, tap to remove)') + '</title>' +
-          '<circle cx="' + f1(q.x) + '" cy="' + f1(q.y) + '" r="' + (loose ? 4.6 : 3.2) + '" fill="' + (loose ? t.rd.color : '#fff') + '" stroke="' + (loose ? '#fff' : t.rd.color) + '" stroke-width="1.4"/></g>';
+          hpt(q.x, q.y, dotSvg(loose ? t.rd.color : '#fff', loose ? '#fff' : t.rd.color, loose ? 6 : 4.5)) + '</g>';
       });
     });
+    // stretch points of the lake or river being reshaped
+    var wsel = waterSel && W.filter(function (w) { return w.id === waterSel; })[0];
+    waterEdit = wsel ? { wb: wsel } : null;
+    var waterPtsSvg = '';
+    if (wsel) {
+      var wl = wsel.kind === 'river' ? wsel.line : wsel.pts;
+      waterPtsSvg += '<path d="' + polyD(waterPoly(wsel)) + '" fill="none" stroke="#1d4d6b" stroke-width="0.9" stroke-dasharray="2.5 2" pointer-events="none"/>';
+      wl.forEach(function (q, k) {
+        waterPtsSvg += '<g class="drag shape-pt" data-drag="wp|' + esc(wsel.id) + '|' + k + '"><title>' + (wsel.kind === 'river' ? 'Bend point (drag to bend or lengthen, tap to remove)' : 'Stretch point (drag to change the shape)') + '</title>' + hpt(wsel.x + q.x, wsel.y + q.y, dotSvg('#fff', '#1d4d6b')) + '</g>';
+      });
+    }
     // stretch points of the habitat being reshaped
     var sc = shapeSel && R.circles.filter(function (c) { return c.seed === shapeSel && (c.type === 'habitat' || c.type === 'aquarium'); })[0];
     if (shapeSel && !sc) shapeSel = null;
@@ -1809,7 +2811,7 @@
       shapeEdit = { seed: sc.seed, cx: sc.x, cy: sc.y, pts: spts, min: sc.unit.base };
       shapeSvg += '<path d="' + outlineD(sc.x, sc.y, spts, 0) + '" fill="none" stroke="#1f2b1c" stroke-width="0.9" stroke-dasharray="2.5 2" pointer-events="none"/>';
       spts.forEach(function (q, k) {
-        shapeSvg += '<g class="drag shape-pt" data-drag="s|' + esc(sc.seed) + '|' + k + '"><title>Stretch point (drag to change the shape)</title><circle cx="' + f1(sc.x + q.x) + '" cy="' + f1(sc.y + q.y) + '" r="3.6" fill="#fff" stroke="#1f2b1c" stroke-width="1.3"/></g>';
+        shapeSvg += '<g class="drag shape-pt" data-drag="s|' + esc(sc.seed) + '|' + k + '"><title>Stretch point (drag to change the shape)</title>' + hpt(sc.x + q.x, sc.y + q.y, dotSvg('#fff', '#1f2b1c')) + '</g>';
       });
     }
     // theme names, placed where they don't cover staff areas, plazas, entrances or other names
@@ -1846,14 +2848,28 @@
       svg += '<g class="drag" data-drag="e|' + i + '"><title>Entrance ' + (i + 1) + ' (drag to move)</title><rect x="' + f1(e.x) + '" y="' + f1(e.y) + '" width="' + f1(e.w) + '" height="' + f1(e.d) + '" rx="4" fill="#3d6a47"/>' +
         '<text x="' + f1(e.cx) + '" y="' + f1(e.cy) + '" font-size="6.5" fill="#fff" text-anchor="middle" dominant-baseline="central">Entrance</text></g>';
     });
-    svg += shapeSvg;
+    var gripAvoid = R.circles.filter(function (c) { return c.type !== 'part'; }).map(function (c) { return { x: c.x, y: c.y, r: c.r }; });
+    if (wsel) waterPtsSvg += gripSvg('wg', wsel.id, waterPoly(wsel), gripAvoid, 'Drag to move this ' + (wsel.kind === 'river' ? 'river' : 'lake'));
+    if (sc) shapeSvg += gripSvg('hg', sc.seed, outlineSamples(spts, 4).map(function (q) { return { x: sc.x + q.x, y: sc.y + q.y }; }), gripAvoid.filter(function (c) { return Math.hypot(c.x - sc.x, c.y - sc.y) > 1; }), 'Drag to move this habitat');
+    svg += shapeSvg + waterPtsSvg;
     var sx = vb[0] + pad, sy = vb[1] + vb[3] - 9;
-    svg += '<rect x="' + f1(sx) + '" y="' + f1(sy - 1.5) + '" width="50" height="3" fill="#22301f"/><text x="' + f1(sx + 55) + '" y="' + f1(sy) + '" font-size="7" fill="#22301f" dominant-baseline="central">50 m</text>';
+    svg += '<g id="zbar" pointer-events="none"><rect x="' + f1(sx) + '" y="' + f1(sy - 1.5) + '" width="50" height="3" fill="#22301f"/><text x="' + f1(sx + 55) + '" y="' + f1(sy) + '" font-size="7" fill="#22301f" dominant-baseline="central">50 m</text></g>';
     svg += '</svg>';
 
     var area = bb.w * bb.h, mapA = S.map * S.map;
     var html = '<section class="card map-card"><div class="map-head"><h2>Layout concept</h2><span class="sub">about ' + fmt(bb.w) + ' × ' + fmt(bb.h) + ' m · ' + (Math.round(area / mapA * 1000) / 10) + '% of the map</span><span class="map-tools"><button type="button" class="secondary icon" id="undo" title="Undo" aria-label="Undo"' + (undoStack.length ? '' : ' disabled') + '>&#8630;</button><button type="button" class="secondary icon" id="redo" title="Redo" aria-label="Redo"' + (redoStack.length ? '' : ' disabled') + '>&#8631;</button><button type="button" class="secondary" id="regen">Regenerate plan</button></span></div>';
-    html += '<div class="map-wrap">' + svg + '</div>';
+    html += '<div class="map-wrap">' + svg + '<div class="zoom-ctl" role="group" aria-label="Zoom"><button type="button" data-zoom="in" title="Zoom in" aria-label="Zoom in">+</button><button type="button" data-zoom="out" title="Zoom out" aria-label="Zoom out">−</button><button type="button" data-zoom="fit" title="Show the whole zoo" aria-label="Show the whole zoo">⤢</button></div></div>';
+    if (wsel) {
+      var wr = wst.body[wsel.id] || { total: 0, by: {} }, parts2 = Object.keys(wr.by).map(function (sd) { var hx = habPolys.filter(function (x) { return x.seed === sd; })[0]; return hx ? fmt(wr.by[sd]) + ' m² in Habitat ' + hx.num : ''; }).filter(Boolean);
+      var open2 = wr.total - Object.keys(wr.by).reduce(function (a, k) { return a + wr.by[k]; }, 0);
+      if (open2 > 4) parts2.push(fmt(open2) + ' m² open water');
+      var isRiver = wsel.kind === 'river';
+      html += '<div class="shape-bar water-bar"><span><b>' + (isRiver ? 'River' : 'Lake') + ' · ' + fmt(waterArea(wsel)) + ' m²</b>' + (parts2.length ? ' <span class="muted">(' + parts2.join(', ') + ')</span>' : '') + '. ' +
+        (isRiver ? (waterDel ? '<strong>Tap the stretch of river to delete.</strong>' : 'Drag the grip to move it and the dots to bend or lengthen it. Tap the river to add a dot; tap a dot to remove it. Drop an end dot on another river’s end to join them.') : 'Drag the grip to move it, or the white dots to reshape it.') + '</span>' +
+        (isRiver ? '<span class="river-w">Width <button type="button" class="secondary small" data-water-act="w-" aria-label="Narrower"' + (wsel.w <= RIVER_MIN ? ' disabled' : '') + '>−</button><input type="number" min="' + RIVER_MIN + '" max="' + RIVER_MAX + '" step="1" value="' + wsel.w + '" data-river-width aria-label="River width in metres"> m<button type="button" class="secondary small" data-water-act="w+" aria-label="Wider"' + (wsel.w >= RIVER_MAX ? ' disabled' : '') + '>+</button></span>' : '') +
+        '<span class="ride-btns">' + (isRiver ? '<button type="button" class="secondary small' + (waterDel ? ' on' : '') + '" data-water-act="delsec">' + (waterDel ? 'Cancel delete' : 'Delete a section') + '</button>' : '') +
+        '<button type="button" class="secondary small danger" data-water-act="delete">Delete</button><button type="button" class="secondary small" data-water-act="done">Done</button></span></div>';
+    }
     if (sc) {
       var su = sc.unit;
       html += '<div class="shape-bar"><span><b>' + (su.aquarium ? 'Aquarium ' : 'Habitat ') + su.num + '</b>: drag the white dots to change its shape. <b id="shape-area">' + fmt(su.area) + ' m²</b> <span class="muted">(minimum ' + fmt(su.base) + ' m²)</span></span>' +
@@ -1864,8 +2880,9 @@
       '<span class="lg"><i style="background:#f0b46a"></i>Plaza</span><span class="lg"><i style="background:#9b8db3"></i>Staff area</span>' +
       '<span class="lg"><i style="background:#3d6a47"></i>Entrance</span><span class="lg"><i style="background:#d9c79e"></i>Path</span>';
     var nPl = R.plazas.length, nSt = R.circles.filter(function (c) { return c.type === 'staff'; }).length;
-    ridesOf(p).forEach(function (rd) { legend += '<span class="lg"><i style="background:' + rd.color + '"></i>' + esc(rd.name) + '</span>'; });
-    if (tracks.some(function (t) { return t.segs.some(function (g) { return g.tight && !g.gap; }); })) legend += '<span class="lg"><i style="background:' + TIGHT_COLOR + '"></i>Bend too tight</span>';
+    if (W.length) legend += '<span class="lg"><i style="background:' + WATER_FILL + ';border-color:' + WATER_EDGE + '"></i>Water</span>';
+    ridesOf(p).forEach(function (rd) { legend += '<span class="lg"' + (rd.hidden ? ' style="opacity:.5"' : '') + '><i style="background:' + rd.color + '"></i>' + esc(rd.name) + (rd.hidden ? ' (hidden)' : '') + '</span>'; });
+    if (tracks.some(function (t) { return !t.rd.hidden && t.segs.some(function (g) { return g.red; }); })) legend += '<span class="lg"><i style="background:' + TIGHT_COLOR + '"></i>Bend too tight</span>';
     html += '<div class="legend">' + legend + '</div>';
     html += ridesHtml(p);
     // key: what's in each numbered enclosure, by theme
@@ -1884,8 +2901,10 @@
     });
     html += key + '</div>';
     html += '<p class="small muted map-note">' + nPl + ' plaza' + (nPl === 1 ? '' : 's') + ', ' + nSt + ' staff area' + (nSt === 1 ? '' : 's') + ', ' +
-      LR.nEnt + ' entrance' + (LR.nEnt === 1 ? '' : 's') + (LR.auto ? ' (suggested)' : '') + '. Numbers match the habitat list below. Hover over a shape for details, or tap a habitat to change its shape.</p>';
-    if (LR.issues.length) html += '<div class="note bad">' + LR.issues.map(esc).join('<br>') + '</div>';
+      LR.nEnt + ' entrance' + (LR.nEnt === 1 ? '' : 's') + (LR.auto ? ' (suggested)' : '') + '. Numbers match the habitat list below. Hover over a shape for details, or tap a habitat or water to change its shape.</p>';
+    var wShort = shortfalls(habPolys, wst), issues = LR.issues.slice();
+    Object.keys(wShort).forEach(function (sd) { var hx = habPolys.filter(function (x) { return x.seed === sd; })[0]; if (hx) issues.push('Habitat ' + hx.num + ' needs ' + fmt(wShort[sd]) + ' m² more water.'); });
+    if (issues.length) html += '<div class="note bad">' + issues.map(esc).join('<br>') + '</div>';
     return html + '</section>';
   }
 
@@ -1928,12 +2947,75 @@
     setupDrag();
   }
 
+  // ---------- zooming and moving round the map ----------
+  var view = { k: 1, cx: null, cy: null, plan: null };
+  function baseVB(svg) { var a = (svg.getAttribute('data-vb') || '0 0 1 1').split(' ').map(Number); return { x: a[0], y: a[1], w: a[2], h: a[3] }; }
+  function applyView(svg) {
+    if (!svg) return;
+    var b = baseVB(svg);
+    if (view.plan !== state.current) { view = { k: 1, cx: null, cy: null, plan: state.current }; }
+    var k = view.k, w = b.w / k, h = b.h / k;
+    if (view.cx === null || k <= 1.0001) { view.cx = b.x + b.w / 2; view.cy = b.y + b.h / 2; }
+    // keep the view on the zoo
+    view.cx = Math.max(b.x + w / 2, Math.min(b.x + b.w - w / 2, view.cx));
+    view.cy = Math.max(b.y + h / 2, Math.min(b.y + b.h - h / 2, view.cy));
+    svg.setAttribute('viewBox', [view.cx - w / 2, view.cy - h / 2, w, h].map(function (v) { return v.toFixed(2); }).join(' '));
+    fixHandles(svg);
+  }
+  // zoom by a factor, keeping the map point (px, py) where it is on screen
+  function zoomAt(svg, factor, px, py) {
+    var b = baseVB(svg), k0 = view.k, k1 = Math.max(1, Math.min(12, k0 * factor));
+    if (k1 === k0) return;
+    var w0 = b.w / k0, h0 = b.h / k0, w1 = b.w / k1, h1 = b.h / k1;
+    var vx0 = view.cx - w0 / 2, vy0 = view.cy - h0 / 2;
+    if (px === undefined) { px = view.cx; py = view.cy; }
+    var rx = (px - vx0) / w0, ry = (py - vy0) / h0;
+    view.k = k1; view.cx = px - rx * w1 + w1 / 2; view.cy = py - ry * h1 + h1 / 2;
+    applyView(svg);
+  }
+  function zoomButton(which) {
+    var svg = document.querySelector('#panel .zoo-map');
+    if (!svg) return;
+    if (which === 'fit') { view.k = 1; applyView(svg); return; }
+    zoomAt(svg, which === 'in' ? 1.5 : 1 / 1.5);
+  }
+
   // ---------- dragging things on the map ----------
   function setupDrag() {
     var svg = document.querySelector('#panel .zoo-map');
     if (!svg) return;
-    var drag = null;
+    var drag = null, touches = {}, pinch = null, pan = null;
     function pt(e) { var q = svg.createSVGPoint(); q.x = e.clientX; q.y = e.clientY; return q.matrixTransform(svg.getScreenCTM().inverse()); }
+    applyView(svg);
+    svg.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      var q = pt(e);
+      zoomAt(svg, Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0016)), q.x, q.y);
+    }, { passive: false });
+    // two fingers: pinch to zoom
+    svg.addEventListener('pointerdown', function (e) {
+      touches[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var ids = Object.keys(touches);
+      if (ids.length === 2) {
+        // a second finger means zoom: drop anything the first finger had picked up
+        if (drag) { drag.g.removeAttribute('transform'); drag.g.classList.remove('dragging'); svg.querySelectorAll('[data-drag][transform]').forEach(function (el) { if (!el.classList.contains('hs')) el.removeAttribute('transform'); }); drag = null; }
+        var a = touches[ids[0]], b = touches[ids[1]];
+        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1 }; tap = null; pan = null;
+      }
+    }, true);
+    svg.addEventListener('pointermove', function (e) {
+      if (!touches[e.pointerId]) return;
+      touches[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var ids = Object.keys(touches);
+      if (pinch && ids.length === 2) {
+        var a = touches[ids[0]], b = touches[ids[1]], d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        var mid = pt({ clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 });
+        zoomAt(svg, d / pinch.d, mid.x, mid.y); pinch.d = d;
+      }
+    }, true);
+    function lift(e) { delete touches[e.pointerId]; if (Object.keys(touches).length < 2) pinch = null; }
+    svg.addEventListener('pointerup', lift, true);
+    svg.addEventListener('pointercancel', lift, true);
     var tap = null;
     svg.addEventListener('pointerdown', function (e) {
       var g = e.target.closest('.drag');
@@ -1941,9 +3023,10 @@
         // not something to drag: remember it in case it's a tap on a ride track or the open map
         var trk = e.target.closest('.trk');
         tap = { x: e.clientX, y: e.clientY, id: e.pointerId, trk: trk ? trk.getAttribute('data-trk') : null };
+        if (!pinch) { pan = { id: e.pointerId, x: e.clientX, y: e.clientY, cx: view.cx, cy: view.cy, u: 1 / (svg.getScreenCTM().a || 1), moved: false }; try { svg.setPointerCapture(e.pointerId); } catch (err) {} }
         return;
       }
-      if (!g || drag) return;
+      if (!g || drag || pinch) return;
       e.preventDefault();
       try { g.setPointerCapture(e.pointerId); } catch (err) {}
       var q = pt(e);
@@ -1952,11 +3035,29 @@
       g.parentNode.appendChild(g); // draw it on top while moving
     });
     svg.addEventListener('pointermove', function (e) {
+      if (pan && e.pointerId === pan.id && !pinch) {
+        var mx = e.clientX - pan.x, my = e.clientY - pan.y;
+        if (!pan.moved && Math.hypot(mx, my) < 4) return;
+        pan.moved = true; svg.classList.add('panning');
+        view.cx = pan.cx - mx * pan.u; view.cy = pan.cy - my * pan.u;
+        applyView(svg);
+        return;
+      }
       if (!drag || e.pointerId !== drag.id) return;
       var q = pt(e);
       drag.dx = q.x - drag.x0; drag.dy = q.y - drag.y0;
       drag.g.setAttribute('transform', 'translate(' + drag.dx.toFixed(1) + ' ' + drag.dy.toFixed(1) + ')');
       var dp = drag.g.getAttribute('data-drag').split('|');
+      if (dp[0] === 'wg' || dp[0] === 'hg') {
+        var tgt = svg.querySelector('[data-drag="' + (dp[0] === 'wg' ? 'w|' : 'c|') + dp[1] + '"]');
+        if (tgt) tgt.setAttribute('transform', 'translate(' + drag.dx.toFixed(1) + ' ' + drag.dy.toFixed(1) + ')');
+      }
+      if (dp[0] === 'wp' && waterEdit && waterEdit.wb.id === dp[1]) {
+        var wb2 = JSON.parse(JSON.stringify(waterEdit.wb)), arr2 = wb2.kind === 'river' ? wb2.line : wb2.pts, kk = Number(dp[2]);
+        arr2[kk] = { x: arr2[kk].x + drag.dx, y: arr2[kk].y + drag.dy };
+        var wel = svg.querySelector('[data-water="' + dp[1] + '"]');
+        if (wel) wel.setAttribute('d', polyD(waterPoly(wb2)));
+      }
       if (dp[0] === 's' && shapeEdit && shapeEdit.seed === dp[1]) {
         var pts2 = shapeEdit.pts.map(function (q) { return { x: q.x, y: q.y }; }), k = Number(dp[2]);
         pts2[k] = { x: pts2[k].x + drag.dx, y: pts2[k].y + drag.dy };
@@ -1966,13 +3067,15 @@
       }
     });
     function end(e) {
+      if (pan && e.pointerId === pan.id) { var wasPan = pan.moved; pan = null; svg.classList.remove('panning'); if (wasPan) { tap = null; return; } }
       if (tap && e.pointerId === tap.id) {
         var tp = tap; tap = null;
+        if (pinch) return;
         if (Math.hypot(e.clientX - tp.x, e.clientY - tp.y) >= 4) return;
         var at = pt(e);
         if (tp.trk) { var tk = tp.trk.split('|'); tapTrack(tk[0], Number(tk[1]), at); }
         else if (editRide) tapOpenMap(at);
-        else if (shapeSel) { shapeSel = null; render(); }
+        else if (shapeSel || waterSel) { shapeSel = null; waterSel = null; render(); }
         return;
       }
       if (!drag || e.pointerId !== drag.id) return;
@@ -1987,11 +3090,16 @@
   }
   function moveItem(parts, dx, dy) {
     if (parts[0] === 's') { stretchPoint(parts[1], Number(parts[2]), dx, dy); return; }
+    if (parts[0] === 'w' || parts[0] === 'wg') { moveWater(parts[1], dx, dy); return; }
+    if (parts[0] === 'hg') parts = ['c', parts[1]];
+    if (parts[0] === 'wp') { stretchWater(parts[1], Number(parts[2]), dx, dy); return; }
     var Lm = toManual(plan()), kind = parts[0], id = parts[1], LR = layoutCache.result;
+    // water entirely inside a habitat moves with it; shared water stays where it is
+    var inside = containedWater(plan()), before = snapPos(plan());
     var stn = kind === 'c' && findStation(plan(), id);
     if (stn) {
       stn.st.x += dx; stn.st.y += dy;
-      if (LR && LR.R) clearStation(stn.st, rideSpecs[stn.ride.type], LR.R.circles);
+      if (LR && LR.R) clearStation(stn.st, rideSpecs[stn.ride.type], LR.R.circles, stn.ride.type, LR);
     } else if (kind === 'b') {
       var rdb = findRide(plan(), id), q = rdb && rdb.track && rdb.track[Number(parts[2])];
       if (q && !q.s) { q.x += dx; q.y += dy; }
@@ -2008,6 +3116,7 @@
         if (auto) Lm.plazas.push({ id: 'pl' + uid(), x: auto.x + dx, y: auto.y + dy });
       }
     } else if (kind === 'e' && Lm.ents[Number(id)]) { Lm.ents[Number(id)].x += dx; Lm.ents[Number(id)].y += dy; }
+    followWater(plan(), inside, before);
     changed();
   }
   // Push neighbours just far enough out of the way of something that was dropped on them.
@@ -2018,6 +3127,7 @@
     LR.R.circles.forEach(function (c) {
       if (c.type === 'part') return;
       var fs = c.type === 'station' && findStation(plan(), c.seed);
+      if (fs && (IN_HAB_OK[fs.ride.type] || onWaterAt(LR, fs.st.x, fs.st.y))) return; // allowed where it is: never bumped
       var ref = fs ? fs.st : c.type === 'staff' ? Lm.staff.filter(function (q) { return q.id === c.seed; })[0] : Lm.pos[c.seed];
       if (!ref) return;
       var fixed = c.seed === movedId;
@@ -2025,7 +3135,10 @@
         var sp = shapeParts(0, 0, ref.shape);
         items.push({ r: sp.rin, ref: ref, ox: 0, oy: 0, fixed: fixed });
         sp.parts.forEach(function (q) { items.push({ r: q.r, ref: ref, ox: q.x, oy: q.y, fixed: fixed }); });
-      } else items.push({ r: c.r, ref: ref, ox: 0, oy: 0, fixed: fixed });
+      } else {
+        var hh = (c.type === 'habitat' || c.type === 'aquarium') && plan().habitats.filter(function (x) { return 'h' + x.id === c.seed; })[0];
+        items.push({ r: hh ? blobMaxR(c.seed, Math.sqrt(Math.max(habitatInfo(hh).area, 16) / Math.PI)) : c.r, ref: ref, ox: 0, oy: 0, fixed: fixed });
+      }
     });
     for (var round = 0; round < 30; round++) {
       var moved = false;
@@ -2045,15 +3158,22 @@
     }
   }
   function tapItem(parts, at) {
+    if (parts[0] === 'wg' || parts[0] === 'hg') return; // grips only move things
     var kind = parts[0], id = parts[1], LR = layoutCache.result;
     var isStaff = kind === 'c' && LR && LR.R.circles.some(function (c) { return c.seed === id && c.type === 'staff'; });
     var stn = kind === 'c' && findStation(plan(), id);
     if (kind === 'b') { tapBend(id, Number(parts[2])); return; }
+    if (kind === 'w') {
+      var twb = findWater(plan(), id);
+      if (twb && waterSel === id && twb.kind === 'river' && at) { tapRiver(twb, at); return; }
+      waterSel = waterSel === id ? null : id; waterDel = false; shapeSel = null; editRide = null; delMode = false; render(); return;
+    }
+    if (kind === 'wp') { var dwb = findWater(plan(), id); if (dwb) tapRiverDot(dwb, Number(parts[2])); return; }
     var hab = kind === 'c' && LR && LR.R.circles.filter(function (c) { return c.seed === id && (c.type === 'habitat' || c.type === 'aquarium'); })[0];
     // while redrawing a gap in a ride's track, taps on habitats place track (gondolas and monorails pass overhead)
     var er = editRide && findRide(plan(), editRide);
     if (hab && er && er.track && er.track.some(function (q) { return q.g; }) && at) { tapOpenMap(at); return; }
-    if (hab) { shapeSel = shapeSel === id ? null : id; editRide = null; delMode = false; render(); return; }
+    if (hab) { shapeSel = shapeSel === id ? null : id; waterSel = null; editRide = null; delMode = false; render(); return; }
     if (stn) {
       if (!window.confirm('Remove this ' + stn.ride.name + ' station?')) return;
       stn.ride.stations = stn.ride.stations.filter(function (q) { return q.id !== id; });
@@ -2129,6 +3249,13 @@
         '<button type="button" class="x" data-action="remove-member" data-h="' + h.id + '" data-i="' + idx + '" aria-label="Remove ' + esc(a.name) + '">×</button></li>';
     });
     html += '</ul>';
+    if (u.water > 0) {
+      var ws = lastWater && lastWater.stats, have = ws ? ws.hab['h' + h.id] || 0 : null, shares = [];
+      if (ws) lastWater.W.forEach(function (wb) { var r = ws.body[wb.id]; if (r && r.by['h' + h.id]) Object.keys(r.by).forEach(function (sd) { if (sd !== 'h' + h.id && r.by[sd] > 4 && shares.indexOf(sd) < 0) shares.push(sd); }); });
+      var shareNames = shares.map(function (sd) { var hx = lastWater.habs.filter(function (x) { return x.seed === sd; })[0]; return hx ? 'Habitat ' + hx.num : null; }).filter(Boolean);
+      html += '<div class="unit-water small">Land ' + fmt(u.area - (have === null ? u.water : have)) + ' m² · water ' + fmt(have === null ? u.water : have) + ' m² <span class="muted">(needs ' + fmt(u.water) + (u.deep > 0 ? ', ' + fmt(u.deep) + ' of it deep' : '') + ')</span>' +
+        (shareNames.length ? ' · <span class="muted">shares water with ' + shareNames.join(', ') + '</span>' : '') + '</div>';
+    }
     html += '<div class="unit-foot">' + themeSelect(u, 'h', h.id) + '</div>';
     if (u.problems.length) html += '<div class="note bad"><strong>These animals can’t share a habitat:</strong> ' + u.problems.map(esc).join(' ') + '</div>';
     u.needs.forEach(function (n) {
@@ -2226,6 +3353,8 @@
   // ---------- undo and redo ----------
   var undoStack = [], redoStack = [], lastSnap = null;
   function changed() {
+    var pw = plan();
+    if (pw.layout && pw.layout.manual) { try { settleWater(pw); } catch (err) { if (window.console) console.error(err); } }
     var now = JSON.stringify(state);
     if (lastSnap !== null && now !== lastSnap) {
       undoStack.push(lastSnap);
@@ -2272,12 +3401,16 @@
       if (e.target.closest('#redo')) return undoRedo(false);
       var rb = e.target.closest('button[data-ride-act]');
       if (rb) return rideAction(rb.getAttribute('data-ride-act'), rb.getAttribute('data-ride'));
+      var zb = e.target.closest('button[data-zoom]');
+      if (zb) return zoomButton(zb.getAttribute('data-zoom'));
+      var wbt = e.target.closest('button[data-water-act]');
+      if (wbt) return waterAction(wbt.getAttribute('data-water-act'));
       var sb = e.target.closest('button[data-shape-act]');
       if (sb) return shapeAction(sb.getAttribute('data-shape-act'));
       if (!e.target.closest('#regen')) return;
       var lost = lostOnRedraw(plan());
       if (lost && !window.confirm('Regenerating the plan will clear ' + lost + '. Regenerate anyway?')) return;
-      clearRides(plan()); shapeSel = null;
+      clearRides(plan()); shapeSel = null; waterSel = null;
       delete plan().layout;
       plan().setup.variant = (plan().setup.variant || 0) + 1;
       changed(); toast('New layout drawn');
@@ -2292,14 +3425,15 @@
       // new themes mean a new arrangement
       var lost = lostOnRedraw(plan());
       if (lost && !window.confirm('Changing the themes redraws the map and will clear ' + lost + '. Change anyway?')) { this.value = plan().setup.theme; return; }
-      clearRides(plan()); shapeSel = null;
+      clearRides(plan()); shapeSel = null; waterSel = null;
       if (plan().layout) toast('The map was redrawn for the new themes');
       plan().setup.theme = this.value; delete plan().layout; changed();
     });
     $('add-facility').addEventListener('change', function () {
       var k = this.value; this.value = '';
       if (!k) return;
-      if (k.indexOf('new:') === 0 || k.indexOf('st:') === 0) addStation(k); else addToMap(k);
+      if (k.indexOf('water:') === 0) addWater(k.slice(6));
+      else if (k.indexOf('new:') === 0 || k.indexOf('st:') === 0) addStation(k); else addToMap(k);
     });
     $('set-entrances').addEventListener('change', function () { plan().setup.entrances = this.value === 'auto' ? 'auto' : Number(this.value); changed(); });
 
@@ -2352,6 +3486,7 @@
       }
     });
     $('panel').addEventListener('change', function (e) {
+      if (e.target.hasAttribute('data-river-width')) { setRiverWidth(e.target.value); return; }
       var s = e.target, act = s.getAttribute('data-action'), p = plan(), type = p.setup.theme;
       if (act === 'hsize') {
         var hh = findHabitat(s.getAttribute('data-h')), info = habitatInfo(Object.assign({}, hh, { size: null }));
@@ -2433,6 +3568,11 @@
       var sh = pos[k] && pos[k].shape;
       if (sh && !(Array.isArray(sh) && sh.length >= 5 && sh.every(function (q) { return q && isFinite(q.x) && isFinite(q.y); }))) delete pos[k].shape;
     });
+    if (p.layout && p.layout.water) p.layout.water = (Array.isArray(p.layout.water) ? p.layout.water : []).filter(function (w) {
+      if (!w || !isFinite(w.x) || !isFinite(w.y)) return false;
+      if (w.kind === 'river') { w.w = Math.max(4, Math.min(20, w.w || 4)); return Array.isArray(w.line) && w.line.length >= 2 && w.w > 0; }
+      return Array.isArray(w.pts) && w.pts.length >= 5;
+    });
     // rides only exist on a hand-arranged map; drop anything broken
     p.rides = Array.isArray(p.rides) && p.layout && p.layout.manual ? p.rides.filter(function (rd) {
       if (!rd || !rideSpecs[rd.type] || !Array.isArray(rd.stations)) return false;
@@ -2477,6 +3617,7 @@
     render();
     lastSnap = JSON.stringify(state);
     undoButtons();
+    window.addEventListener('resize', function () { fixHandles(document.querySelector('#panel .zoo-map')); });
     document.addEventListener('keydown', function (e) {
       if (!(e.ctrlKey || e.metaKey) || /input|select|textarea/i.test((e.target || {}).tagName || '')) return;
       var k = e.key.toLowerCase();

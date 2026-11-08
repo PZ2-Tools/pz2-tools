@@ -140,6 +140,8 @@
   .ride.hidden-ride .ride-head b { color: var(--muted); }
   .shape-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 10px; font-size: 14px; }
   .shape-bar .ride-btns { margin-left: auto; }
+  .river-w { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; }
+  .river-w input { width: 58px; font: inherit; font-weight: 700; text-align: right; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
   .unit-water { margin-top: 6px; color: #2f6680; }
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(20px); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 50; max-width: calc(100% - 32px); }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -1628,9 +1630,8 @@
   // Smooth only the bend points round each too-tight bend, a little at a time, until
   // nothing is red. Stations never move. Returns how many tight bends are left.
   function correctTrack(rd) {
-    var sp = rideSpecs[rd.type], minR = minRadius(sp);
+    var sp = rideSpecs[rd.type], minR = minRadius(sp), tightR = minR * 0.97;
     if (!rd.track) return [];
-    function badness() { return trackGeo(trackPts(rd), sp).reduce(function (s, g) { return s + (g.tight && !g.gap ? minR - Math.min(g.rmin, minR) + 1 : 0); }, 0); }
     // dots almost on top of each other make a tiny, too-tight bend: merge them first
     var mergeD = Math.max(sp.minLen * 0.5, 3), merged = true;
     while (merged && rd.track && rd.track.length > 3) {
@@ -1645,57 +1646,60 @@
       }
     }
     if (!rd.track) return [];
-    var start = { bad: badness(), track: JSON.parse(JSON.stringify(rd.track)) };
-    if (start.bad > 0) {
-      // first: run the track straight through any station with a tight bend beside it
-      var P0 = trackPts(rd), n0 = P0.length, geo0 = trackGeo(P0, sp), locked = {};
-      P0.forEach(function (q, i) {
-        if (!q.s) return;
-        var ip = (i - 1 + n0) % n0, inx = (i + 1) % n0;
-        if (![(i - 2 + n0) % n0, ip, i, inx].some(function (k) { return geo0[k].tight && !geo0[k].gap; })) return;
-        if (rd.track[ip].s || rd.track[inx].s) return;
-        var a = P0[ip], b = P0[inx], ux = b.x - a.x, uy = b.y - a.y, ul = Math.hypot(ux, uy) || 1;
-        ux /= ul; uy /= ul;
-        var d = Math.max(minR, Math.min(Math.hypot(a.x - q.x, a.y - q.y), Math.hypot(b.x - q.x, b.y - q.y)));
-        rd.track[ip] = Object.assign({}, rd.track[ip], { x: q.x - ux * d, y: q.y - uy * d });
-        rd.track[inx] = Object.assign({}, rd.track[inx], { x: q.x + ux * d, y: q.y + uy * d });
-        locked[ip] = locked[inx] = true;
-      });
-      // then: nudge only the bend points round each tight bend, a little at a time, in whichever
-      // direction makes the bend gentler (stations never move)
-      var T = rd.track, n = T.length, orig = T.map(function (q) { return { x: q.x, y: q.y }; });
-      var P = trackPts(rd);
-      var segBad = function (i) {
-        i = (i + n) % n;
-        if (P[i].g) return 0;
-        var b = segBez(P, i), r = Infinity;
-        for (var k = 0; k <= 16; k++) r = Math.min(r, bezRadius(b, k / 16));
-        return r < minR * 0.97 ? minR - Math.min(r, minR) + 1 : 0;
+    var startTrack = JSON.parse(JSON.stringify(rd.track));
+    function segR(P, i) { var b = segBez(P, i), r = Infinity; for (var k = 0; k <= 20; k++) r = Math.min(r, bezRadius(b, k / 20)); return r; }
+    function deficit(P) { var tot = 0; for (var i = 0; i < P.length; i++) { if (P[i].g) continue; var r = segR(P, i); if (r < minR) tot += minR - r; } return tot; }
+    function anyTight(P) { return trackGeo(P, sp).some(function (g) { return g.tight && !g.gap; }); }
+    var startDef = deficit(trackPts(rd)), t0 = Date.now();
+    var dirs = [];
+    for (var a8 = 0; a8 < 8; a8++) dirs.push({ x: Math.cos(a8 * Math.PI / 4), y: Math.sin(a8 * Math.PI / 4) });
+    for (var pass = 0; pass < 4; pass++) {
+      var P = trackPts(rd), n = P.length, i;
+      if (!anyTight(P)) break;
+      if (pass > 0) {
+        // still tight: give long tight stretches an extra dot, so the bend has more room
+        var ins = [];
+        for (i = 0; i < n; i++) if (!P[i].g && segR(P, i) < tightR && Math.hypot(P[(i + 1) % n].x - P[i].x, P[(i + 1) % n].y - P[i].y) > sp.minLen * 1.5) ins.push(i);
+        ins.reverse().forEach(function (k) { var m = bezAt(segBez(P, k), 0.5); rd.track.splice(k + 1, 0, { x: m.x, y: m.y }); });
+        P = trackPts(rd); n = P.length;
+      }
+      var orig = P.map(function (q) { return { x: q.x, y: q.y }; }), free = rd.track.map(function (q) { return !q.s; });
+      // the cost: how much too tight, plus a small charge for moving dots (so they stay near where they were put)
+      // only the stretches near the tight bends are measured, which keeps it quick
+      var win = [];
+      var cost = function () {
+        var c = 0;
+        win.forEach(function (k) { if (P[k].g) return; var r = segR(P, k); if (r < minR) c += (minR - r) * 10; });
+        for (var k = 0; k < n; k++) if (free[k]) c += 0.01 * (Math.pow(P[k].x - orig[k].x, 2) + Math.pow(P[k].y - orig[k].y, 2));
+        return c;
       };
-      var local = function (k) { return segBad(k - 2) + segBad(k - 1) + segBad(k) + segBad(k + 1); };
-      var dirs = [];
-      for (var a8 = 0; a8 < 8; a8++) dirs.push({ x: Math.cos(a8 * Math.PI / 4), y: Math.sin(a8 * Math.PI / 4) });
-      for (var step = Math.max(2, minR / 4), guard = 0; step >= 0.5 && guard < 300; guard++) {
-        var near = {}, any = false;
-        for (var i = 0; i < n; i++) if (segBad(i)) { any = true; [-1, 0, 1, 2].forEach(function (d) { near[(i + d + n) % n] = true; }); }
-        if (!any) break;
+      for (var step = Math.max(3, minR / 4), guard = 0; step >= 0.25 && guard < 400 && Date.now() - t0 < 1500; guard++) {
+        var near = {}, ws = {};
+        for (i = 0; i < n; i++) if (!P[i].g && segR(P, i) < tightR) for (var d = -3; d <= 4; d++) near[(i + d + n) % n] = true;
+        if (!Object.keys(near).length) break;
+        Object.keys(near).forEach(function (k) { for (var d2 = -2; d2 <= 1; d2++) ws[(Number(k) + d2 + n) % n] = true; });
+        win = Object.keys(ws).map(Number);
+        var cur = cost();
         var improved = false;
-        Object.keys(near).forEach(function (kk) {
-          var k = Number(kk);
-          if (T[k].s) return;
-          var base = local(k), q0 = { x: P[k].x, y: P[k].y }, bestMove = null;
-          dirs.forEach(function (d) {
-            P[k].x = q0.x + d.x * step; P[k].y = q0.y + d.y * step;
-            var v = local(k) + 0.001 * Math.hypot(P[k].x - orig[k].x, P[k].y - orig[k].y);
-            if (v < base - 1e-3 && (!bestMove || v < bestMove.v)) bestMove = { v: v, x: P[k].x, y: P[k].y };
+        Object.keys(near).map(Number).forEach(function (k) {
+          // move one dot, or two or three neighbouring dots together
+          [[k], [k, (k + 1) % n], [(k - 1 + n) % n, k, (k + 1) % n]].forEach(function (group) {
+            if (group.some(function (g) { return !free[g]; })) return;
+            var save = group.map(function (g) { return { x: P[g].x, y: P[g].y }; }), best = null;
+            dirs.forEach(function (dv) {
+              group.forEach(function (g, j) { P[g].x = save[j].x + dv.x * step; P[g].y = save[j].y + dv.y * step; });
+              var c = cost();
+              if (c < cur - 1e-6 && (!best || c < best.c)) best = { c: c, dv: dv };
+            });
+            group.forEach(function (g, j) { P[g].x = save[j].x + (best ? best.dv.x * step : 0); P[g].y = save[j].y + (best ? best.dv.y * step : 0); });
+            if (best) { cur = best.c; improved = true; }
           });
-          if (bestMove) { P[k].x = bestMove.x; P[k].y = bestMove.y; improved = true; } else { P[k].x = q0.x; P[k].y = q0.y; }
         });
         if (!improved) step /= 2;
       }
-      rd.track = T.map(function (q, i) { return q.s ? q : Object.assign({}, q, { x: P[i].x, y: P[i].y }); });
-      if (badness() > start.bad) rd.track = start.track;
+      rd.track = rd.track.map(function (q, k) { return q.s ? q : Object.assign({}, q, { x: P[k].x, y: P[k].y }); });
     }
+    if (deficit(trackPts(rd)) > startDef + 1e-6) rd.track = startTrack; // never leave it worse
     var P1 = trackPts(rd), n1 = P1.length;
     return trackGeo(P1, sp).filter(function (g) { return g.tight && !g.gap; }).map(function (g) { return { atStation: !!(P1[g.i].s || P1[(g.i + 1) % n1].s) }; });
   }
@@ -1937,11 +1941,57 @@
     var wb = findWater(p, id);
     if (!wb) return;
     var arr = wb.kind === 'river' ? wb.line : wb.pts, o = { x: arr[k].x, y: arr[k].y };
+    // an end dot dropped on the end of another river joins the two into one river
+    if (wb.kind === 'river' && (k === 0 || k === arr.length - 1) && joinRivers(p, wb, k, wb.x + o.x + dx, wb.y + o.y + dy)) return;
     var who = guardedWaterEdit(p, function (t) { arr[k] = { x: o.x + dx * t, y: o.y + dy * t }; });
     if (waterArea(wb) < 20) { arr[k] = o; toast('That’s as small as it can go'); }
     wb.edited = true;
     changed();
     if (who) toast('Stopped there: making it smaller would leave ' + who + ' short of water');
+  }
+  var RIVER_MIN = 4, RIVER_MAX = 20;
+  function unitsPerPx() { var svg = document.querySelector('#panel .zoo-map'), m = svg && svg.getScreenCTM && svg.getScreenCTM(); return m && m.a ? 1 / m.a : 0.5; }
+  function joinRivers(p, wb, k, ax, ay) {
+    var snap = Math.max(4, 14 * unitsPerPx()), W = p.layout.water, target = null;
+    W.forEach(function (o) {
+      if (o === wb || o.kind !== 'river' || target) return;
+      [0, o.line.length - 1].forEach(function (e) {
+        var ex = o.x + o.line[e].x, ey = o.y + o.line[e].y;
+        if (!target && Math.hypot(ex - ax, ey - ay) <= snap) target = { o: o, e: e };
+      });
+    });
+    if (!target) return false;
+    var abs = function (r) { return r.line.map(function (q) { return { x: r.x + q.x, y: r.y + q.y }; }); };
+    var A = abs(wb), B = abs(target.o);
+    if (k === 0) A.reverse();            // A now ends at the dot that was dropped
+    if (target.e !== 0) B.reverse();     // B now starts at the end it was dropped on
+    var joined = A.slice(0, -1).concat(B); // the dropped dot lands exactly on B's end
+    var saved = { line: wb.line, x: wb.x, y: wb.y, w: wb.w }, idx = W.indexOf(target.o);
+    var who = tryWaterChange(p, function () {
+      wb.line = joined.map(function (q) { return { x: q.x - wb.x, y: q.y - wb.y }; });
+      wb.w = Math.max(wb.w, target.o.w);
+      W.splice(idx, 1);
+    }, function () {
+      wb.line = saved.line; wb.w = saved.w;
+      if (W.indexOf(target.o) < 0) W.splice(idx, 0, target.o);
+    });
+    if (who) { render(); toast('Can’t join these: ' + who + ' would be short of water'); return true; }
+    wb.edited = true;
+    changed(); toast('Rivers joined');
+    return true;
+  }
+  function setRiverWidth(want) {
+    var p = plan(), wb = waterSel && findWater(p, waterSel);
+    if (!wb || wb.kind !== 'river') return;
+    want = Math.round(Number(want));
+    if (!(want > 0)) { render(); return; }
+    var w1 = Math.max(RIVER_MIN, Math.min(RIVER_MAX, want)), w0 = wb.w;
+    if (w1 !== want) toast(want > RIVER_MAX ? 'Rivers go up to ' + RIVER_MAX + ' m wide. For wider water, use a lake' : 'Rivers are at least ' + RIVER_MIN + ' m wide');
+    var who = guardedWaterEdit(p, function (t) { wb.w = w0 + (w1 - w0) * t; });
+    wb.w = Math.round(wb.w * 10) / 10;
+    wb.edited = true;
+    changed();
+    if (who) toast('Stopped at ' + wb.w + ' m: any narrower would leave ' + who + ' short of water');
   }
   function addWater(kind) {
     var p = plan();
@@ -1971,6 +2021,7 @@
     var p = plan(), wb = waterSel && findWater(p, waterSel);
     if (act === 'done' || !wb) { waterSel = null; waterDel = false; render(); return; }
     if (act === 'delsec') { waterDel = !waterDel; render(); return; }
+    if (act === 'w-' || act === 'w+') { setRiverWidth(wb.w + (act === 'w+' ? 1 : -1)); return; }
     if (act === 'delete') {
       var W = p.layout.water, i = W.indexOf(wb), habs = habPolysState(p);
       var before = shortfalls(habs, waterStats(habs, W), true);
@@ -2331,7 +2382,8 @@
       if (open2 > 4) parts2.push(fmt(open2) + ' m² open water');
       var isRiver = wsel.kind === 'river';
       html += '<div class="shape-bar water-bar"><span><b>' + (isRiver ? 'River' : 'Lake') + ' · ' + fmt(waterArea(wsel)) + ' m²</b>' + (parts2.length ? ' <span class="muted">(' + parts2.join(', ') + ')</span>' : '') + '. ' +
-        (isRiver ? (waterDel ? '<strong>Tap the stretch of river to delete.</strong>' : 'Drag the grip to move it and the dots to bend or lengthen it. Tap the river to add a dot; tap a dot to remove it.') : 'Drag the grip to move it, or the white dots to reshape it.') + '</span>' +
+        (isRiver ? (waterDel ? '<strong>Tap the stretch of river to delete.</strong>' : 'Drag the grip to move it and the dots to bend or lengthen it. Tap the river to add a dot; tap a dot to remove it. Drop an end dot on another river’s end to join them.') : 'Drag the grip to move it, or the white dots to reshape it.') + '</span>' +
+        (isRiver ? '<span class="river-w">Width <button type="button" class="secondary small" data-water-act="w-" aria-label="Narrower"' + (wsel.w <= RIVER_MIN ? ' disabled' : '') + '>−</button><input type="number" min="' + RIVER_MIN + '" max="' + RIVER_MAX + '" step="1" value="' + wsel.w + '" data-river-width aria-label="River width in metres"> m<button type="button" class="secondary small" data-water-act="w+" aria-label="Wider"' + (wsel.w >= RIVER_MAX ? ' disabled' : '') + '>+</button></span>' : '') +
         '<span class="ride-btns">' + (isRiver ? '<button type="button" class="secondary small' + (waterDel ? ' on' : '') + '" data-water-act="delsec">' + (waterDel ? 'Cancel delete' : 'Delete a section') + '</button>' : '') +
         '<button type="button" class="secondary small danger" data-water-act="delete">Delete</button><button type="button" class="secondary small" data-water-act="done">Done</button></span></div>';
     }
@@ -2950,6 +3002,7 @@
       }
     });
     $('panel').addEventListener('change', function (e) {
+      if (e.target.hasAttribute('data-river-width')) { setRiverWidth(e.target.value); return; }
       var s = e.target, act = s.getAttribute('data-action'), p = plan(), type = p.setup.theme;
       if (act === 'hsize') {
         var hh = findHabitat(s.getAttribute('data-h')), info = habitatInfo(Object.assign({}, hh, { size: null }));

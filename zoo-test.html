@@ -601,14 +601,23 @@
     var del = d3.Delaunay.from(pts), T = del.triangles, H = del.halfedges;
     for (var t = 0; t < T.length / 3; t++) {
       var tri = [circles[T[3 * t]], circles[T[3 * t + 1]], circles[T[3 * t + 2]]];
-      var mx = (tri[0].x + tri[1].x + tri[2].x) / 3, my = (tri[0].y + tri[1].y + tri[2].y) / 3, px = 0, py = 0;
-      tri.forEach(function (c) {
-        var dx = mx - c.x, dy = my - c.y, d = Math.hypot(dx, dy) || 1;
-        px += (c.x + dx / d * c.r) / 3; py += (c.y + dy / d * c.r) / 3;
-      });
-      var clear = Math.min.apply(null, tri.map(function (c) { return Math.hypot(px - c.x, py - c.y) - c.r; }));
+      // the point in the gap between these three that's as far as possible from all of them
+      var px = (tri[0].x + tri[1].x + tri[2].x) / 3, py = (tri[0].y + tri[1].y + tri[2].y) / 3;
+      var clr = function (x, y) { return Math.min.apply(null, tri.map(function (c) { return Math.hypot(x - c.x, y - c.y) - c.r; })); };
+      var clear = clr(px, py), step = Math.max(tri[0].r, tri[1].r, tri[2].r, 10) / 2;
+      var sgn = function (ax, ay, bx, by, x, y) { return (bx - ax) * (y - ay) - (by - ay) * (x - ax); };
+      var inTri = function (x, y) {
+        var d1 = sgn(tri[0].x, tri[0].y, tri[1].x, tri[1].y, x, y), d2 = sgn(tri[1].x, tri[1].y, tri[2].x, tri[2].y, x, y), d3 = sgn(tri[2].x, tri[2].y, tri[0].x, tri[0].y, x, y);
+        return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+      };
+      for (var it = 0; it < 60 && step > 0.2; it++) {
+        var m = tri.reduce(function (b, c) { return Math.hypot(px - c.x, py - c.y) - c.r < Math.hypot(px - b.x, py - b.y) - b.r ? c : b; }, tri[0]);
+        var dx = px - m.x, dy = py - m.y, dl = Math.hypot(dx, dy) || 1;
+        var nx = px + dx / dl * step, ny = py + dy / dl * step, nc = clr(nx, ny);
+        if (nc > clear && inTri(nx, ny)) { px = nx; py = ny; clear = nc; } else step *= 0.6;
+      }
       var ghosts = tri.filter(function (c) { return c.ghost; }).length;
-      nodes.push({ x: px, y: py, ok: clear > -2 && clear < 70 && ghosts < 3 });
+      nodes.push({ x: px, y: py, ok: clear > -2 && clear < 250 && ghosts < 3 });
     }
     function segDist(ax, ay, bx, by, cx, cy) {
       var vx = bx - ax, vy = by - ay, l2 = vx * vx + vy * vy, u = l2 ? Math.max(0, Math.min(1, ((cx - ax) * vx + (cy - ay) * vy) / l2)) : 0;
@@ -623,7 +632,9 @@
       if (ci.ghost && cj.ghost) continue;
       // the path must squeeze between the two enclosures, not through them
       if (segDist(n1.x, n1.y, n2.x, n2.y, ci.x, ci.y) < ci.r * 0.9 || segDist(n1.x, n1.y, n2.x, n2.y, cj.x, cj.y) < cj.r * 0.9) continue;
-      edges.push({ a: t1, b: t2, len: Math.hypot(n1.x - n2.x, n1.y - n2.y), fronts: [i, j].filter(function (k) { return !circles[k].ghost; }) });
+      // a path only counts as passing an enclosure if it actually runs close beside it
+      var near = function (k) { var c = circles[k]; return !c.ghost && segDist(n1.x, n1.y, n2.x, n2.y, c.x, c.y) - c.r <= 14; };
+      edges.push({ a: t1, b: t2, len: Math.hypot(n1.x - n2.x, n1.y - n2.y), fronts: [i, j].filter(near) });
     }
     return { nodes: nodes, edges: edges };
   }
@@ -659,44 +670,49 @@
     if (!net.edges.length) return kept;
     if (style === 'web') net.edges.forEach(function (e, i) { kept[i] = true; });
     else {
-      // main loop: waypoints round the zoo, about halfway out, joined by the shortest gaps
-      var used = net.nodes.map(function (n, i) { return net.adj[i].length ? i : -1; }).filter(function (i) { return i >= 0; });
-      var cx = 0, cy = 0, wsum = 0;
-      circles.forEach(function (c) { cx += c.x * c.A; cy += c.y * c.A; wsum += c.A; });
-      cx /= wsum; cy /= wsum;
-      var R = Math.max.apply(null, used.map(function (i) { return Math.hypot(net.nodes[i].x - cx, net.nodes[i].y - cy); }));
-      var sectors = Math.max(5, Math.min(16, Math.round(2 * Math.PI * R * 0.5 / 70))), way = [];
-      for (var s = 0; s < sectors; s++) {
-        var a0 = -Math.PI + s * 2 * Math.PI / sectors, a1 = a0 + 2 * Math.PI / sectors, cand = [];
-        used.forEach(function (i) {
-          var n = net.nodes[i], a = Math.atan2(n.y - cy, n.x - cx);
-          if (a >= a0 && a < a1) cand.push(i);
+      // Main loop: pick a middle block of neighbouring enclosures (about half the zoo,
+      // starting from the centre) and run the path round its edge. That makes one
+      // continuous loop with enclosures on both sides: the block inside, the rest outside.
+      var nb = circles.map(function () { return {}; }), outer = circles.map(function () { return false; });
+      net.edges.forEach(function (e) {
+        if (e.fronts.length === 2) { nb[e.fronts[0]][e.fronts[1]] = true; nb[e.fronts[1]][e.fronts[0]] = true; }
+        else if (e.fronts.length === 1) outer[e.fronts[0]] = true;
+      });
+      var cx = 0, cy = 0, wsum = 0, total = 0;
+      circles.forEach(function (c) { if (c.type !== 'staff') { cx += c.x * c.A; cy += c.y * c.A; wsum += c.A; total += c.A; } });
+      cx /= wsum || 1; cy /= wsum || 1;
+      var dist = function (i) { return Math.hypot(circles[i].x - cx, circles[i].y - cy); };
+      var order = circles.map(function (c, i) { return i; }).filter(function (i) { return circles[i].type !== 'staff'; }).sort(function (a, b) { return dist(a) - dist(b); });
+      var inside = {}, area = 0;
+      if (order.length) { inside[order[0]] = true; area = circles[order[0]].A; }
+      for (var grow = 0; grow < circles.length && area < total * 0.45; grow++) {
+        var cand = null;
+        Object.keys(inside).forEach(function (i) {
+          Object.keys(nb[i]).forEach(function (j) {
+            j = Number(j);
+            if (inside[j] || outer[j] || circles[j].type === 'staff') return;
+            if (cand === null || dist(j) < dist(cand)) cand = j;
+          });
         });
-        if (!cand.length) continue;
-        var far = Math.max.apply(null, cand.map(function (i) { return Math.hypot(net.nodes[i].x - cx, net.nodes[i].y - cy); }));
-        cand.sort(function (i, j) {
-          var di = Math.abs(Math.hypot(net.nodes[i].x - cx, net.nodes[i].y - cy) - far * 0.55), dj = Math.abs(Math.hypot(net.nodes[j].x - cx, net.nodes[j].y - cy) - far * 0.55);
-          return di - dj;
-        });
-        way.push(cand[0]);
+        if (cand === null) break;
+        inside[cand] = true; area += circles[cand].A;
       }
-      var usedEdge = {};
-      for (var w = 0; w < way.length && way.length > 1; w++) {
-        var from = way[w], to = way[(w + 1) % way.length];
-        var res = dijkstra(net, [from], function (ei) { return net.edges[ei].len * (usedEdge[ei] ? 6 : 1); });
-        if (res.dist[to] === Infinity) continue;
-        var node = to, g2 = 0;
-        while (res.prev[node] >= 0 && g2++ < 5000) { var ei = res.prev[node], e = net.edges[ei]; kept[ei] = true; usedEdge[ei] = true; node = e.a === node ? e.b : e.a; }
-      }
+      net.edges.forEach(function (e, i) {
+        var ins = e.fronts.filter(function (f) { return inside[f]; }).length;
+        if (ins === 1) kept[i] = true;
+      });
+      closeGaps(net, kept);
       if (style === 'theme-loops') {
         // a loop round each theme: every gap between two different themes
         net.edges.forEach(function (e, i) { var a = circles[e.fronts[0]], b = circles[e.fronts[1]]; if (e.fronts.length === 2 && a.cluster >= 0 && b.cluster >= 0 && a.cluster !== b.cluster) kept[i] = true; });
+        // and round the outside of each theme that's on the edge of the zoo
+        net.edges.forEach(function (e, i) { if (e.fronts.length === 1 && circles[e.fronts[0]].cluster >= 0 && circles[e.fronts[0]].type !== 'staff') kept[i] = true; });
       }
     }
     // every enclosure must be on a path (big habitats on two sides, so all of them can be seen)
     var fronting = circles.map(function () { return []; });
     net.edges.forEach(function (e, i) { e.fronts.forEach(function (c) { fronting[c].push(i); }); });
-    function need(c) { return c.type === 'staff' ? 0 : (c.type === 'habitat' && c.r > c.D) ? 2 : 1; } // staff areas don't need a guest path
+    function need(c) { return c.type === 'staff' ? 0 : 1; } // staff areas don't need a guest path
     for (var pass = 0; pass < 2; pass++) {
       circles.forEach(function (c, ci) {
         var have = fronting[ci].filter(function (ei) { return kept[ei]; }).length;
@@ -715,6 +731,7 @@
         if (res) { var e2 = net.edges[best.ei]; walkBack(net, res, res.dist[e2.a] <= res.dist[e2.b] ? e2.a : e2.b, kept); }
       });
     }
+    connectAll(net, kept);
     // trim dead-end paths that don't lead past anything that needs them
     var count = circles.map(function (c, ci) { return fronting[ci].filter(function (ei) { return kept[ei]; }).length; });
     for (var guard = 0; guard < 2000; guard++) {
@@ -765,6 +782,38 @@
       cands.forEach(function (cd) { if (Math.hypot(cd.x - st.x, cd.y - st.y) < 2 * sr + 6) cd.used = true; });
     }
   }
+  // If a loop is broken (some gaps between enclosures couldn't be used), join its loose ends.
+  function closeGaps(net, kept) {
+    for (var guard = 0; guard < 40; guard++) {
+      var deg = {};
+      Object.keys(kept).forEach(function (ei) { var e = net.edges[ei]; deg[e.a] = (deg[e.a] || 0) + 1; deg[e.b] = (deg[e.b] || 0) + 1; });
+      var ends = Object.keys(deg).filter(function (n) { return deg[n] === 1; }).map(Number);
+      if (ends.length < 2) return;
+      var a = ends[0], res = dijkstra(net, [a], function (ei) { return kept[ei] ? 1e6 : net.edges[ei].len; }), best = null;
+      ends.slice(1).forEach(function (b) { if (res.dist[b] < 1e6 && (!best || res.dist[b] < res.dist[best])) best = b; });
+      if (best === null) return;
+      var node = best, g = 0;
+      while (res.prev[node] >= 0 && g++ < 5000) { var ei = res.prev[node], e = net.edges[ei]; kept[ei] = true; node = e.a === node ? e.b : e.a; }
+    }
+  }
+  // Join separate pieces of path into one network.
+  function connectAll(net, kept) {
+    for (var guard = 0; guard < 40; guard++) {
+      var ids = Object.keys(kept).map(Number);
+      if (!ids.length) return;
+      var comp = {}, start = net.edges[ids[0]].a, stack = [start], adjK = {};
+      ids.forEach(function (ei) { var e = net.edges[ei]; (adjK[e.a] = adjK[e.a] || []).push(e.b); (adjK[e.b] = adjK[e.b] || []).push(e.a); });
+      comp[start] = true;
+      while (stack.length) { var n = stack.pop(); (adjK[n] || []).forEach(function (m) { if (!comp[m]) { comp[m] = true; stack.push(m); } }); }
+      var others = Object.keys(adjK).filter(function (n) { return !comp[n]; }).map(Number);
+      if (!others.length) return;
+      var res = dijkstra(net, Object.keys(comp).map(Number)), best = null;
+      others.forEach(function (n) { if (res.dist[n] !== Infinity && (best === null || res.dist[n] < res.dist[best])) best = n; });
+      if (best === null) return;
+      var node = best, g = 0;
+      while (res.prev[node] >= 0 && g++ < 5000) { var ei = res.prev[node], e = net.edges[ei]; kept[ei] = true; node = e.a === node ? e.b : e.a; }
+    }
+  }
   function gapBetween(a, b) { return Math.hypot(a.x - b.x, a.y - b.y) - a.r - b.r; }
 
   // One complete attempt; returns the plan and any rule that failed.
@@ -799,18 +848,24 @@
       for (; k < 40 && circles.some(function (o) { return rectCircleGap({ x: ex - S.entW / 2, y: ey - S.entD / 2, w: S.entW, h: S.entD }, o) < 2; }); k++) { ex += ux * 4; ey += uy * 4; }
       return { x: ex, y: ey, pushed: k * 4 };
     }
+    // Entrances: start from the path nearest the edge in each direction and walk straight
+    // out until clear of the zoo, so every entrance path is short and crosses nothing.
     var ents = angles.map(function (ang, i) {
       var dx = Math.cos(ang), dy = Math.sin(ang), best = null;
-      anchors.forEach(function (c) {
-        var reach = (c.x - cx) * dx + (c.y - cy) * dy + c.r, side = Math.abs(-(c.x - cx) * dy + (c.y - cy) * dx);
-        var sp = spotFor(c, dx, dy);
-        var score = reach - side * 0.6 - sp.pushed * 3;
-        if (!best || score > best.score) best = { score: score, sp: sp };
+      keptNodes.forEach(function (n) {
+        var nd = net.nodes[n], proj = (nd.x - cx) * dx + (nd.y - cy) * dy, side = Math.abs(-(nd.x - cx) * dy + (nd.y - cy) * dx);
+        var blocked = false, t = 0, ex = nd.x, ey = nd.y;
+        for (; t < 400; t += 4) {
+          ex = nd.x + dx * t; ey = nd.y + dy * t;
+          if (circles.some(function (c) { return Math.hypot(ex - c.x, ey - c.y) < c.r - 1; })) { blocked = true; break; }
+          var box = { x: ex - S.entW / 2, y: ey - S.entD / 2, w: S.entW, h: S.entD };
+          if (t > S.entD / 2 && circles.every(function (c) { return rectCircleGap(box, c) > 3; })) break;
+        }
+        var score = proj - side * 0.5 - t * 0.3 - (blocked ? 1e5 : 0);
+        if (!best || score > best.score) best = { score: score, n: n, ex: ex, ey: ey };
       });
-      var ex = best.sp.x, ey = best.sp.y;
-      var nearest = null;
-      keptNodes.forEach(function (n) { var d = Math.hypot(net.nodes[n].x - ex, net.nodes[n].y - ey); if (!nearest || d < nearest.d) nearest = { d: d, n: n }; });
-      return { id: 'e' + i, x: ex - S.entW / 2, y: ey - S.entD / 2, w: S.entW, d: S.entD, cx: ex, cy: ey, node: nearest ? nearest.n : null, link: nearest ? net.nodes[nearest.n] : null };
+      if (!best) { best = { n: null, ex: cx - 200, ey: cy }; }
+      return { id: 'e' + i, x: best.ex - S.entW / 2, y: best.ey - S.entD / 2, w: S.entW, d: S.entD, cx: best.ex, cy: best.ey, node: best.n, link: best.n !== null ? net.nodes[best.n] : null };
     });
     var plazas = [];
     return { circles: circles, clusters: packed.clusters, net: net, kept: kept, keptNet: keptNet, keptNodes: keptNodes, ents: ents, plazas: plazas, problems: problems };
@@ -839,7 +894,7 @@
     function spaced(n) { return chosen.every(function (q) { return Math.hypot(net.nodes[q].x - net.nodes[n].x, net.nodes[q].y - net.nodes[n].y) >= minGap; }); }
     for (var guard = 0; guard < 300; guard++) {
       var best = null;
-      [true, false].some(function (strict) {
+      [true].some(function (strict) {
         nodes.forEach(function (n) {
           if (chosen.indexOf(n) >= 0 || (strict && !spaced(n))) return;
           var gain = within[n].filter(function (m) { return !covered[m]; }).length;
@@ -1043,13 +1098,18 @@
     R.circles.forEach(function (c) { if (c.type === 'staff') avoid.push({ x: c.x - S.staffW / 2, y: c.y - S.staffD / 2, w: S.staffW, h: S.staffD, k: 8 }); });
     R.plazas.forEach(function (pz) { avoid.push({ x: pz.x - S.plazaW / 2, y: pz.y - S.plazaD / 2, w: S.plazaW, h: S.plazaD, k: 8 }); });
     R.ents.forEach(function (e) { avoid.push({ x: e.x, y: e.y, w: e.w, h: e.d, k: 8 }); });
-    R.circles.forEach(function (c) { if (c.type === 'habitat' || c.type === 'aquarium') avoid.push({ x: c.x - c.r * 0.55, y: c.y - c.r * 0.25, w: c.r * 1.1, h: c.r * 0.5, k: 3 }); });
+    R.circles.forEach(function (c) {
+      if (c.type === 'habitat' || c.type === 'aquarium') avoid.push({ x: c.x - c.r * 0.8, y: c.y - c.r * 0.8, w: c.r * 1.6, h: c.r * 1.6, k: 2 }, { x: c.x - 8, y: c.y - 8, w: 16, h: 16, k: 12 });
+      else if (c.bw) avoid.push({ x: c.x - c.bw / 2, y: c.y - c.bd / 2, w: c.bw, h: c.bd, k: 8 });
+    });
+    // paths count a little, so names sit on greenery where possible
+    lines.forEach(function (l) { l.forEach(function (q) { avoid.push({ x: q[0] - S.P / 2, y: q[1] - S.P / 2, w: S.P, h: S.P, k: 1 }); }); });
     function overlap(a, b) { return Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)); }
     R.clusters.forEach(function (cl) {
       var fs = Math.max(6, Math.min(11, cl.r / 8)), txt = cl.theme.toUpperCase(), tw = txt.length * fs * 0.68, th = fs * 1.2, best = null;
       for (var k = 0; k < 24; k++) {
         var a = k / 24 * Math.PI * 2;
-        [0.55, 0.8, 1.0].forEach(function (fr) {
+        [0.5, 0.75, 0.95, 1.1].forEach(function (fr) {
           var x = cl.x + Math.cos(a) * cl.r * fr, y = cl.y + Math.sin(a) * cl.r * fr;
           var rb = { x: x - tw / 2, y: y - th / 2, w: tw, h: th }, score = 0;
           avoid.forEach(function (o) { score += overlap(rb, o) * o.k; });

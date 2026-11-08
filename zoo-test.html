@@ -79,6 +79,8 @@
   .members { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; }
   .members li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 14px; }
   .members .mname { flex: 1 1 160px; }
+  .hsize { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; }
+  .hsize input { width: 92px; font: inherit; font-weight: 700; text-align: right; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
   .gsize { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
   .gsize input { width: 74px; font: inherit; font-size: 14px; color: var(--ink); padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
   .gsize input::placeholder { color: #9aa192; }
@@ -99,6 +101,7 @@
   .map-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 8px; }
   .map-head h2 { font-size: 20px; }
   .map-head .sub { color: var(--muted); font-size: 14px; }
+  .map-head #regen { margin-left: auto; }
   .map-wrap { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #f7f3ea; }
   .zoo-map { display: block; width: 100%; height: auto; max-height: 75vh; font-family: "DM Sans", system-ui, sans-serif; }
   .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 13px; }
@@ -139,7 +142,7 @@
         <div class="row"><select id="plan-pick" aria-label="Plan"></select><button type="button" class="secondary" id="plan-new">New plan</button></div>
       </div>
       <label class="field"><span>Plan name</span><input type="text" id="plan-name" maxlength="60"></label>
-      <div class="row small"><button type="button" class="secondary danger" id="plan-del">Delete this plan</button></div>
+      <div class="row small"><button type="button" class="secondary danger" id="plan-clear">Clear zoo</button><button type="button" class="secondary danger" id="plan-del">Delete this plan</button></div>
     </section>
 
     <section class="card" aria-label="Setup">
@@ -153,26 +156,12 @@
           <option value="taxonomy">Taxonomy (mammals, birds, reptiles…)</option>
         </select>
       </label>
-      <div class="field"><span>Habitat shapes</span>
-        <div class="seg" role="radiogroup" aria-label="Habitat shapes">
-          <label><input type="radio" name="shape" value="freeform">Freeform</label>
-          <label><input type="radio" name="shape" value="grid">Grid</label>
-        </div>
-      </div>
-      <label class="field"><span>Path style</span>
-        <select id="set-paths">
-          <option value="loop">Simple loop</option>
-          <option value="theme-loops">Loop with theme loops</option>
-          <option value="web">Web</option>
-        </select>
-      </label>
       <label class="field"><span>Entrances</span>
         <select id="set-entrances">
           <option value="auto">Suggest for me</option>
           <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
         </select>
       </label>
-      <p class="muted small" style="margin:0">Shapes, path style and entrances are saved now and used when the map is drawn.</p>
     </section>
 
     <section class="card" aria-label="Add animals">
@@ -338,8 +327,9 @@
   function habitatInfo(h) {
     var c = calc(h.members);
     var base = h.imported && h.imported.size ? h.imported.size : c.base;
-    var pct = setting('Extra Space (%)') || 0;
-    return { base: base, area: base * (1 + pct / 100), aquarium: c.aquarium, problems: c.problems };
+    var pct = setting('Extra Space (%)') || 0, area = base * (1 + pct / 100);
+    if (h.size) area = Math.max(h.size, base); // the player's own size, never below the minimum
+    return { base: base, area: area, aquarium: c.aquarium, problems: c.problems };
   }
 
   // Thrive needs that depend on other species (social groups or a named species).
@@ -486,7 +476,7 @@
   // Freeform draws soft blobs and winding paths; Grid draws the same plan squared off.
   // =====================================================================
   var THEME_COLORS = ['#a9cf96', '#ecc58a', '#a9c8e6', '#dfa9c0', '#d3c58c', '#97cfbd', '#e8b498', '#bcb0e3', '#c4d98f', '#e9d27a', '#9cc6da', '#d5ae8c', '#b8d4a8', '#dcb3d6'];
-  var ZOO_GREEN = '#d6e6c3', layoutCache = { key: null, result: null };
+  var ZOO_GREEN = '#d6e6c3', layoutCache = { key: null, result: null }, R_VARIANT = 0;
 
   function L() {
     return {
@@ -545,10 +535,12 @@
   }
 
   // Pack each theme into a cluster, then pack the clusters together.
-  function packAll(byTheme, themeNames, S, more) {
-    var gap = (S.P + 4) / 2, all = [], clusters = [];
+  function packAll(byTheme, themeNames, S, more, variant) {
+    var gap = (S.P + 4) / 2, all = [], clusters = [], vr = rand(seedOf('v' + (variant || 0)));
+    var jig = function () { return variant ? 0.55 + vr() * 0.9 : 1; };
     themeNames.forEach(function (t, ti) {
-      var list = byTheme[t].slice().sort(function (a, b) { return b.A - a.A; });
+      // biggest first packs neatly; "Regenerate plan" shuffles the order a little for a different look
+      var list = byTheme[t].map(function (it) { return { it: it, k: it.A * jig() }; }).sort(function (a, b) { return b.k - a.k; }).map(function (o) { return o.it; });
       if (!list.length) return;
       var nHab = list.filter(function (it) { return it.type === 'habitat' || it.type === 'aquarium'; }).length;
       // staff areas go right beside the habitats that needed one
@@ -563,6 +555,10 @@
       clusters.push({ theme: t, ti: ti, circles: circles, r: enc.r + 4, cx: enc.x, cy: enc.y });
     });
     if (!clusters.length) return { circles: [], clusters: [] };
+    if (variant) {
+      // a different arrangement of the themes too
+      clusters = clusters.map(function (c) { return { c: c, k: vr() }; }).sort(function (a, b) { return a.k - b.k; }).map(function (o) { return o.c; });
+    }
     d3.packSiblings(clusters);
     clusters.forEach(function (c, ci) {
       c.circles.forEach(function (k) {
@@ -819,7 +815,7 @@
   // One complete attempt; returns the plan and any rule that failed.
   function attempt(units, themeNames, S, style, more, nEnt) {
     var byTheme = baseItems(units, themeNames);
-    var packed = packAll(byTheme, themeNames, S, more), circles = packed.circles;
+    var packed = packAll(byTheme, themeNames, S, more, R_VARIANT), circles = packed.circles;
     rimStaff(circles, S);
     var net = gapNetwork(circles, S), kept = choosePaths(net, circles, packed.clusters, style);
     var keptIdx = Object.keys(kept).map(Number), problems = [];
@@ -887,7 +883,7 @@
       take(e.node);
       // the entrance plaza is drawn right inside the entrance, on its path
       var nx = net.nodes[e.node].x, ny = net.nodes[e.node].y, dx = nx - e.cx, dy = ny - e.cy, dl = Math.hypot(dx, dy) || 1;
-      var step = Math.min(dl, Math.max(S.entW, S.entD) / 2 + S.plazaW / 2 + 2);
+      var step = Math.max(S.entW, S.entD) / 2 + S.plazaW / 2 + 3; // just clear of the entrance
       at[e.node] = { x: e.cx + dx / dl * step, y: e.cy + dy / dl * step };
     });
     var minGap = Math.max(S.plazaW * 2, S.spacing / 2);
@@ -910,7 +906,8 @@
     }
     R.plazas = chosen.map(function (n) {
       var q = at[n] || net.nodes[n], pz = { x: q.x, y: q.y, w: S.plazaW, d: S.plazaD };
-      nudgeClear(pz, R.circles, q, 16);
+      var blocks = R.circles.concat(R.ents.map(function (e) { return { x: e.cx, y: e.cy, r: Math.hypot(e.w, e.d) / 2 }; }));
+      nudgeClear(pz, blocks, q, 16);
       return pz;
     });
     // plazas also stay clear of each other's footprint
@@ -943,8 +940,9 @@
   }
 
   function computeLayout(units, themeNames, p) {
-    var S = L(), style = p.setup.paths;
-    var key = JSON.stringify([style, p.setup.entrances, S, themeNames, units.map(function (u) { return [u.kind, u.num, u.themeNow, Math.round(u.area), u.keys, u.w, u.d]; })]);
+    var S = L(), style = 'theme-loops', variant = p.setup.variant || 0;
+    R_VARIANT = variant;
+    var key = JSON.stringify([variant, p.setup.entrances, S, themeNames, units.map(function (u) { return [u.kind, u.num, u.themeNow, Math.round(u.area), u.keys, u.w, u.d]; })]);
     if (layoutCache.key === key) return layoutCache.result;
     if (!window.d3 || !d3.packSiblings || !d3.Delaunay) throw new Error('The drawing library didn’t load. Please refresh the page.');
     var auto = p.setup.entrances === 'auto', nEnt = auto ? 1 : Number(p.setup.entrances) || 1;
@@ -1012,7 +1010,7 @@
     return d + (closed ? 'Z' : '');
   }
   function blob(c, scale) {
-    var rnd = rand(seedOf(c.seed || String(c.x))), n = 14, pts = [], ph = rnd() * 6.28;
+    var rnd = rand(seedOf((c.seed || String(c.x)) + '|' + R_VARIANT)), n = 14, pts = [], ph = rnd() * 6.28;
     var a1 = 0.06 + rnd() * 0.06, a2 = 0.04 + rnd() * 0.05, k1 = 2 + Math.floor(rnd() * 2);
     for (var i = 0; i < n; i++) {
       var t = i / n * Math.PI * 2, rr = c.r * scale * (1 + a1 * Math.sin(k1 * t + ph) + a2 * Math.sin((k1 + 2) * t + ph * 1.7) + (rnd() - 0.5) * 0.05);
@@ -1044,7 +1042,7 @@
 
   function mapHtml(units, themeNames) {
     var p = plan(), LR = computeLayout(units, themeNames, p), R = LR.R, S = LR.S, bb = LR.bb;
-    var free = p.setup.shape !== 'grid';
+    var free = true;
     var pad = 10, vb = [bb.x - pad, bb.y - pad, bb.w + 2 * pad, bb.h + 2 * pad + 20];
     var colorOf = {};
     themeNames.forEach(function (t, i) { colorOf[t] = THEME_COLORS[i % THEME_COLORS.length]; });
@@ -1129,7 +1127,7 @@
     svg += '</svg>';
 
     var area = bb.w * bb.h, mapA = S.map * S.map;
-    var html = '<section class="card map-card"><div class="map-head"><h2>Layout concept</h2><span class="sub">about ' + fmt(bb.w) + ' × ' + fmt(bb.h) + ' m · ' + (Math.round(area / mapA * 1000) / 10) + '% of the map</span></div>';
+    var html = '<section class="card map-card"><div class="map-head"><h2>Layout concept</h2><span class="sub">about ' + fmt(bb.w) + ' × ' + fmt(bb.h) + ' m · ' + (Math.round(area / mapA * 1000) / 10) + '% of the map</span><button type="button" class="secondary" id="regen">Regenerate plan</button></div>';
     html += '<div class="map-wrap">' + svg + '</div>';
     var legend = themeNames.map(function (t) { return '<span class="lg"><i style="background:' + colorOf[t] + '"></i>' + esc(t) + '</span>'; }).join('') +
       (R.circles.some(function (c) { return c.type === 'aquarium'; }) ? '<span class="lg"><i style="background:#9ccbe3;border-color:#2f6680"></i>Aquarium</span>' : '') +
@@ -1215,7 +1213,7 @@
   function habitatHtml(u, allHab) {
     var h = u.h, keys = u.keys;
     var html = '<div class="unit"><div class="unit-head"><span class="unit-title">' + (u.aquarium ? 'Aquarium ' : 'Habitat ') + u.num + (h.imported ? ' <span class="kind">From Habitat Planner</span>' : '') + '</span>' +
-      '<span class="area">' + fmt(u.area) + ' m² <span class="muted small">(' + fmt(u.base) + ' + ' + (setting('Extra Space (%)') || 0) + '%)</span></span></div>';
+      '<label class="area hsize">' + '<input type="number" inputmode="numeric" min="' + Math.ceil(u.base) + '" step="10" value="' + Math.round(u.area) + '" data-action="hsize" data-h="' + h.id + '" aria-label="Habitat ' + u.num + ' size in square metres, at least ' + Math.ceil(u.base) + '"> m²</label></div>';
     html += '<ul class="members">';
     h.members.forEach(function (m, idx) {
       var a = model.animals[m.key];
@@ -1278,9 +1276,7 @@
     var nameBox = $('plan-name');
     if (document.activeElement !== nameBox || nameBox.getAttribute('data-plan') !== p.id) { nameBox.value = p.name; nameBox.setAttribute('data-plan', p.id); }
     $('set-theme').value = p.setup.theme;
-    $('set-paths').value = p.setup.paths;
     $('set-entrances').value = String(p.setup.entrances);
-    Array.prototype.forEach.call(document.querySelectorAll('input[name=shape]'), function (r) { r.checked = r.value === p.setup.shape; });
     $('plan-del').disabled = state.plans.length < 2;
   }
   // Search boxes for adding animals (type to narrow the list, like the Habitat Planner).
@@ -1337,6 +1333,18 @@
     });
     $('plan-name').addEventListener('input', function () { plan().name = this.value; save(); renderPlanBar(); });
     $('plan-name').addEventListener('blur', function () { if (!plan().name.trim()) { plan().name = 'Untitled plan'; changed(); } });
+    $('plan-clear').addEventListener('click', function () {
+      var p = plan();
+      if (!p.habitats.length && !p.exhibits.length) return;
+      if (!window.confirm('Remove every habitat and exhibit from "' + p.name + '"? Your setup choices stay. This can’t be undone.')) return;
+      p.habitats = []; p.exhibits = []; p.setup.variant = 0;
+      changed(); toast('Zoo cleared');
+    });
+    $('panel').addEventListener('click', function (e) {
+      if (!e.target.closest('#regen')) return;
+      plan().setup.variant = (plan().setup.variant || 0) + 1;
+      changed(); toast('New layout drawn');
+    });
     $('plan-del').addEventListener('click', function () {
       if (state.plans.length < 2) return;
       if (!window.confirm('Delete the plan "' + plan().name + '"? This can’t be undone.')) return;
@@ -1344,11 +1352,7 @@
       state.current = state.plans[0].id; changed();
     });
     $('set-theme').addEventListener('change', function () { plan().setup.theme = this.value; changed(); });
-    $('set-paths').addEventListener('change', function () { plan().setup.paths = this.value; changed(); });
     $('set-entrances').addEventListener('change', function () { plan().setup.entrances = this.value === 'auto' ? 'auto' : Number(this.value); changed(); });
-    Array.prototype.forEach.call(document.querySelectorAll('input[name=shape]'), function (r) {
-      r.addEventListener('change', function () { if (this.checked) { plan().setup.shape = this.value; changed(); } });
-    });
 
   }
   function addHabitatAnimal(k) {
@@ -1400,7 +1404,14 @@
     });
     $('panel').addEventListener('change', function (e) {
       var s = e.target, act = s.getAttribute('data-action'), p = plan(), type = p.setup.theme;
-      if (act === 'size') {
+      if (act === 'hsize') {
+        var hh = findHabitat(s.getAttribute('data-h')), info = habitatInfo(Object.assign({}, hh, { size: null }));
+        var want = Math.round(Number(s.value));
+        if (s.value.trim() === '' || !(want > 0)) hh.size = null;
+        else if (want < Math.ceil(info.base)) { hh.size = Math.ceil(info.base); toast('That’s below the minimum, so it’s set to ' + fmt(Math.ceil(info.base)) + ' m²'); }
+        else hh.size = want;
+        changed();
+      } else if (act === 'size') {
         var hs = findHabitat(s.getAttribute('data-h')), mi = hs.members[Number(s.getAttribute('data-i'))];
         var v = Math.floor(Number(s.value));
         mi.n = s.value.trim() !== '' && v >= 1 ? v : null;

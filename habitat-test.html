@@ -124,6 +124,13 @@
   .controls .thrive-box { color: var(--thrive); font-weight: 500; }
   .lock-note { color: var(--thrive); font-size: 12.5px; }
   .empty-note { color: var(--muted); font-size: 14px; margin: 14px 0 2px; }
+  .send-zoo { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .send-help { font-size: 13px; margin: 2px 0 8px; }
+  .send-row { display: flex; gap: 8px; }
+  .send-row select { flex: 1; min-width: 0; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); }
+  .send-done { font-size: 14px; margin: 8px 0 0; color: var(--accent); font-weight: 500; }
+  .send-done:empty { display: none; }
+  .send-done a { color: var(--accent); }
   .filters { margin-bottom: 12px; }
   .filter-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; }
   .filter-btn {
@@ -289,6 +296,15 @@
     <label class="thrive-all"><input type="checkbox" id="thrive-all"> Thrive all</label>
     <div id="rows"></div>
     <p class="empty-note" id="empty-note">No animals added yet. Search above to add your first one.</p>
+    <div class="send-zoo" id="send-zoo" hidden>
+      <div class="sizes-title">Send to Zoo Planner</div>
+      <p class="muted send-help">Adds this habitat, with these animals and group sizes, to a zoo plan.</p>
+      <div class="send-row">
+        <select id="send-plan" aria-label="Zoo plan to send to"></select>
+        <button type="button" class="primary" id="send-btn">Send</button>
+      </div>
+      <p class="send-done" id="send-done" role="status"></p>
+    </div>
   </section>
 
   <section class="panel" id="panel" aria-live="polite">
@@ -307,6 +323,64 @@
 if (typeof document !== 'undefined') (function () {
   var model = null;
   var state = { rows: [] };
+  var lastRes = null;
+
+  // ---------- send to the Zoo Planner ----------
+  // The Zoo Planner keeps its plans in this browser under this name.
+  var ZOO_KEY = 'pz2-zoo-planner-v1', ZOO_PAGE = 'zoo-test.html';
+  function zooState() {
+    var z = null;
+    try { z = JSON.parse(window.localStorage.getItem(ZOO_KEY) || 'null'); } catch (e) { z = null; }
+    return z && z.version === 1 && Array.isArray(z.plans) ? z : null;
+  }
+  function zooId() { return Math.random().toString(36).slice(2, 10); }
+  function fillSendPlans() {
+    var z = zooState(), sel = $('send-plan'), keep = sel.value;
+    var opts = (z ? z.plans : []).map(function (p) {
+      return '<option value="' + esc(p.id) + '">' + esc(p.name || 'Untitled plan') + '</option>';
+    });
+    opts.push('<option value="__new">' + (z ? 'A new zoo plan' : 'A new zoo plan (My zoo)') + '</option>');
+    sel.innerHTML = opts.join('');
+    if (keep && sel.querySelector('option[value="' + keep + '"]')) sel.value = keep;
+    else if (z && z.current) sel.value = z.current;
+  }
+  function showSendBox(res) {
+    var box = $('send-zoo');
+    box.hidden = !res.count;
+    if (!res.count) { $('send-done').textContent = ''; return; }
+    if (document.activeElement !== $('send-plan')) fillSendPlans();
+  }
+  function sendToZoo() {
+    var res = lastRes;
+    if (!res || !res.count) return;
+    var z = zooState(), choice = $('send-plan').value, plan;
+    if (!z) z = { version: 1, current: null, plans: [] };
+    if (choice === '__new' || !choice) {
+      plan = { id: zooId(), name: z.plans.length ? 'Zoo plan ' + (z.plans.length + 1) : 'My zoo',
+        setup: { theme: 'continent', shape: 'grid', paths: 'theme-loops', entrances: 'auto' }, habitats: [], exhibits: [] };
+      z.plans.push(plan);
+    } else {
+      plan = z.plans.filter(function (p) { return p.id === choice; })[0];
+    }
+    var total = Number($('size-total').value);
+    var size = total > 0 ? total : res.space.minSize;
+    plan.habitats.push({
+      id: zooId(),
+      members: state.rows.map(function (r) {
+        var a = model.animals[r.key];
+        return { key: r.key, n: a.collective ? r.count : r.males + r.females };
+      }),
+      manual: true,
+      imported: { size: size, at: new Date().toISOString() },
+      theme: {}
+    });
+    z.current = plan.id;
+    try { window.localStorage.setItem(ZOO_KEY, JSON.stringify(z)); }
+    catch (e) { $('send-done').textContent = 'This browser isn’t letting the page save, so the habitat couldn’t be sent.'; return; }
+    fillSendPlans();
+    $('send-plan').value = plan.id;
+    $('send-done').innerHTML = 'Sent to “' + esc(plan.name) + '” (' + fmt(size) + ' m² before extra space). <a href="' + ZOO_PAGE + '">Open the Zoo Planner</a>';
+  }
   // How deep "deep water" has to be in the game, in metres. Change this number if the game changes it.
   var DEEP_WATER_DEPTH = 2;
   var $ = function (id) { return document.getElementById(id); };
@@ -530,6 +604,8 @@ if (typeof document !== 'undefined') (function () {
     var res = PZ.calculate(model, state.rows, {
       total: $('size-total').value, land: $('size-land').value, water: $('size-water').value
     });
+    lastRes = res;
+    showSendBox(res);
     var panel = $('panel');
     // Show the minimums as hints inside the empty size boxes
     if (res.count && res.space) {
@@ -723,6 +799,8 @@ if (typeof document !== 'undefined') (function () {
       if (t && e.target.closest('.tip button')) t.classList.toggle('open');
     });
     $('add-btn').addEventListener('click', addFromSearch);
+    $('send-btn').addEventListener('click', sendToZoo);
+    $('send-plan').addEventListener('focus', fillSendPlans);
     ['size-total', 'size-land', 'size-water'].forEach(function (id) { $(id).addEventListener('input', update); });
     $('f-toggle').addEventListener('click', function () {
       var open = $('f-panel').hidden;

@@ -508,7 +508,7 @@
 
   function habitatHtml(u, allHab) {
     var h = u.h, keys = u.keys;
-    var html = '<div class="unit"><div class="unit-head"><span class="unit-title">' + (u.aquarium ? 'Aquarium ' : 'Habitat ') + u.num + '</span>' +
+    var html = '<div class="unit"><div class="unit-head"><span class="unit-title">' + (u.aquarium ? 'Aquarium ' : 'Habitat ') + u.num + (h.imported ? ' <span class="kind">From Habitat Planner</span>' : '') + '</span>' +
       '<span class="area">' + fmt(u.area) + ' m² <span class="muted small">(' + fmt(u.base) + ' + ' + (setting('Extra Space (%)') || 0) + '%)</span></span></div>';
     html += '<ul class="members">';
     h.members.forEach(function (m, idx) {
@@ -679,6 +679,7 @@
       if (act === 'remove-member') {
         var h = findHabitat(b.getAttribute('data-h')), i = Number(b.getAttribute('data-i'));
         h.members.splice(i, 1);
+        h.imported = null;
         if (!h.members.length) p.habitats.splice(p.habitats.indexOf(h), 1);
         changed();
       } else if (act === 'remove-walk-member') {
@@ -697,6 +698,7 @@
         var hs = findHabitat(s.getAttribute('data-h')), mi = hs.members[Number(s.getAttribute('data-i'))];
         var v = Math.floor(Number(s.value));
         mi.n = s.value.trim() !== '' && v >= 1 ? v : null;
+        hs.imported = null;
         changed();
       } else if (act === 'swarms') {
         var sw = findExhibit(s.getAttribute('data-e')).members[Number(s.getAttribute('data-i'))];
@@ -721,9 +723,9 @@
         if (s.value === '__new') {
           p.habitats.splice(p.habitats.indexOf(from) + 1, 0, { id: uid(), members: [m], manual: true, imported: null, theme: {} });
         } else {
-          var to = findHabitat(s.value); to.members.push(m); to.manual = true;
+          var to = findHabitat(s.value); to.members.push(m); to.manual = true; to.imported = null;
         }
-        from.manual = true;
+        from.manual = true; from.imported = null;
         if (!from.members.length) p.habitats.splice(p.habitats.indexOf(from), 1);
         changed();
         toast(nameOf(m.key) + ' moved');
@@ -788,6 +790,11 @@
     fillAddLists();
     wire();
     wirePanel();
+    // pick up habitats sent from the Habitat Planner in another tab
+    window.addEventListener('storage', function (e) {
+      if (e.key !== STORE_KEY) return;
+      var s = load(); s.plans.forEach(cleanPlan); state = s; render();
+    });
     render();
   }
   function fail(msg) { $('panel').innerHTML = '<div class="card status">' + esc(msg) + ' Please try refreshing the page.</div>'; }

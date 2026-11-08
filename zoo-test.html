@@ -133,6 +133,7 @@
   .zoo-map .trk { cursor: pointer; }
   .shape-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 10px; font-size: 14px; }
   .shape-bar .ride-btns { margin-left: auto; }
+  .unit-water { margin-top: 6px; color: #2f6680; }
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(20px); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 50; max-width: calc(100% - 32px); }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   footer { padding: 0 10px 24px; color: var(--muted); font-size: 12.5px; }
@@ -197,7 +198,7 @@
       <label class="field"><span>Add to the map</span>
         <select id="add-facility"><option value="">Add a staff area, plaza or ride station…</option><option value="staff">Staff area</option><option value="plaza">Guest plaza</option></select>
       </label>
-      <p class="muted small" style="margin:0">Drag anything on the map to move it; the paths follow. Tap a habitat to change its shape. Tap a staff area, plaza or ride station to remove it. Habitats are sized for each animal's group size, with every thrive need met, plus extra space. Leave a group size blank to use the largest group allowed automatically (shown in grey).</p>
+      <p class="muted small" style="margin:0">Drag anything on the map to move it; the paths follow. Tap a habitat or water to change its shape. Tap a staff area, plaza or ride station to remove it. Habitats are sized for each animal's group size, with every thrive need met, plus extra space. Leave a group size blank to use the largest group allowed automatically (shown in grey).</p>
     </section>
 
     <section class="card" aria-label="Backup">
@@ -339,7 +340,7 @@
     if (res.plants && res.plants.noMatch) problems.push('No plant coverage suits all of them.');
     if (res.salinity && res.salinity.noMatch) problems.push('No water salinity suits all of them.');
     if (res.terrain && res.terrain.noMatch) problems.push('Their terrain needs can’t all fit together.');
-    var out = { base: res.space ? res.space.minSize : 0, aquarium: !!res.aquariumOnly, problems: problems };
+    var out = { base: res.space ? res.space.minSize : 0, water: res.space && res.space.water ? res.space.water.v || 0 : 0, deep: res.space && res.space.deep ? res.space.deep.v || 0 : 0, aquarium: !!res.aquariumOnly, problems: problems };
     calcCache[sig] = out;
     return out;
   }
@@ -350,9 +351,11 @@
   function habitatInfo(h) {
     var c = calc(h.members);
     var base = h.imported && h.imported.size ? h.imported.size : c.base;
-    var pct = setting('Extra Space (%)') || 0, area = base * (1 + pct / 100);
+    var pct = setting('Extra Space (%)') || 0, water = c.aquarium ? 0 : Math.min(c.water || 0, base);
+    // the extra space goes to land only; water is exactly what the animals need
+    var area = (base - water) * (1 + pct / 100) + water;
     if (h.size) area = Math.max(h.size, base); // the player's own size, never below the minimum
-    return { base: base, area: area, aquarium: c.aquarium, problems: c.problems };
+    return { base: base, area: area, water: water, deep: c.aquarium ? 0 : Math.min(c.deep || 0, water), aquarium: c.aquarium, problems: c.problems };
   }
 
   // Thrive needs that depend on other species (social groups or a named species).
@@ -464,7 +467,7 @@
     p.habitats.forEach(function (h, i) {
       var inf = habitatInfo(h), keys = keysOf(h.members);
       var themeOv = h.theme && h.theme[type];
-      units.push({ kind: 'habitat', h: h, num: i + 1, keys: keys, area: inf.area, base: inf.base, aquarium: inf.aquarium,
+      units.push({ kind: 'habitat', h: h, num: i + 1, keys: keys, area: inf.area, base: inf.base, water: inf.water, deep: inf.deep, aquarium: inf.aquarium,
         problems: inf.problems, needs: unmetNeeds(h.members), cands: unitCandidates(keys, type), override: themeOv || null });
     });
     var walkNum = 0;
@@ -1057,7 +1060,7 @@
     });
     var bb = circleBounds(R.circles, R.ents, 18);
     if (bb.w > S.map || bb.h > S.map) issues.push('This zoo is bigger than a ' + S.map + ' m map.');
-    var res = { R: R, S: S, nEnt: nEnt, auto: auto, issues: issues, bb: bb };
+    var res = { R: R, S: S, nEnt: nEnt, auto: auto, issues: issues, bb: bb, water: autoLakes(R) };
     window.PZ_ZOO_LAYOUT = res; // for troubleshooting
     layoutCache = { key: key, result: res };
     return res;
@@ -1120,10 +1123,12 @@
     }
     if (!Lm.ents || Lm.ents.length !== nEnt) { Lm.ents = R.ents.map(function (e) { return { x: e.cx, y: e.cy }; }); placedNew = true; }
     placePlazas(R, S, Lm.plazas || []);
+    if (!Lm.water) { Lm.water = []; placedNew = true; }
+    if (settleWater(p, true)) placedNew = true; // new habitats get their starting lake
     if (placedNew) save();
     var issues = [];
     if (R.problems.some(function (q) { return q.kind === 'staff'; })) issues.push('Some habitats are more than ' + S.staffMax + ' m from a staff area.');
-    var res = { R: R, S: S, nEnt: nEnt, auto: false, manual: true, issues: issues, bb: circleBounds(R.circles, R.ents, 18) };
+    var res = { R: R, S: S, nEnt: nEnt, auto: false, manual: true, issues: issues, bb: circleBounds(R.circles, R.ents, 18), water: Lm.water || [] };
     window.PZ_ZOO_LAYOUT = res;
     return res;
   }
@@ -1138,7 +1143,7 @@
   function toManual(p) {
     if (p.layout && p.layout.manual) return p.layout;
     var LR = layoutCache.result;
-    var Lm = { manual: true, pos: {}, staff: [], plazas: [], ents: [] };
+    var Lm = { manual: true, pos: {}, staff: [], plazas: [], ents: [], water: LR && LR.water ? JSON.parse(JSON.stringify(LR.water)) : [] };
     if (LR && LR.R) {
       LR.R.circles.forEach(function (c) { if (c.type === 'station') return; if (c.type === 'staff') Lm.staff.push({ id: c.seed, x: c.x, y: c.y }); else Lm.pos[c.seed] = { x: c.x, y: c.y }; });
       LR.R.plazas.forEach(function (q) { if (q.mine) Lm.plazas.push({ id: q.id, x: q.x, y: q.y }); });
@@ -1417,10 +1422,10 @@
   function facilityOptions() {
     var p = plan(), sel = $('add-facility');
     if (!sel) return;
-    var html = '<option value="">Add a staff area, plaza or ride station…</option><option value="staff">Staff area</option><option value="plaza">Guest plaza</option><optgroup label="Ride station">';
+    var html = '<option value="">Add a staff area, plaza, ride station or water…</option><option value="staff">Staff area</option><option value="plaza">Guest plaza</option><optgroup label="Ride station">';
     ridesOf(p).forEach(function (rd) { html += '<option value="st:' + esc(rd.id) + '">Station for ' + esc(rd.name) + '</option>'; });
     BUILT_RIDES.forEach(function (t) { html += '<option value="new:' + t + '">New ' + esc(rideSpecs[t].name.toLowerCase()) + '</option>'; });
-    sel.innerHTML = html + '</optgroup>';
+    sel.innerHTML = html + '</optgroup><optgroup label="Water"><option value="water:lake">Lake</option><option value="water:river">River</option></optgroup>';
   }
   // tapping the track, a bend point, or the open map while a ride is being edited
   function tapTrack(rideId, i, at) {
@@ -1568,7 +1573,8 @@
     var w = [];
     if (hasStations(p)) w.push('your transport rides');
     if (hasShapes(p)) w.push('your habitat shapes');
-    return w.join(' and ');
+    if (hasWaterEdits(p)) w.push('your lake and river changes');
+    return w.length > 1 ? w.slice(0, -1).join(', ') + ' and ' + w[w.length - 1] : w.join('');
   }
   function stretchPoint(seed, k, dx, dy) {
     var p = plan(), LR = layoutCache.result, c = LR && LR.R.circles.filter(function (o) { return o.seed === seed; })[0];
@@ -1586,10 +1592,17 @@
       if (shapeArea(pts) < minA) pts = scaleShape(pts, minA);
       toast('That’s the minimum size for this habitat (' + fmt(minA) + ' m²)');
     }
-    pos.shape = pts;
-    c.unit.h.size = Math.max(Math.ceil(minA), Math.round(shapeArea(pts)));
+    var inside = containedWater(p), before = snapPos(p), h0 = c.unit.h.size, from = (pos.shape || defaultShape(seed, Math.sqrt(c.A / Math.PI))).map(function (q) { return { x: q.x, y: q.y }; });
+    var hab = p.habitats.filter(function (x) { return 'h' + x.id === seed; })[0] || c.unit.h;
+    var who = guardedWaterEdit(p, function (t) {
+      pos.shape = from.map(function (q, i) { return { x: q.x + (pts[i].x - q.x) * t, y: q.y + (pts[i].y - q.y) * t }; });
+      hab.size = t ? Math.max(Math.ceil(minA), Math.round(shapeArea(pos.shape))) : h0;
+    });
+    if (!pos.shape || shapeArea(pos.shape) < minA - 1) { pos.shape = pts; hab.size = Math.max(Math.ceil(minA), Math.round(shapeArea(pts))); }
     makeRoom(Lm, seed, pos);
+    followWater(p, inside, before);
     changed();
+    if (who) toast('Stopped there: going further would leave ' + who + ' short of water');
   }
   function shapeAction(act) {
     var p = plan(), pos = p.layout && p.layout.pos && p.layout.pos[shapeSel];
@@ -1659,6 +1672,293 @@
     return trackGeo(P1, sp).filter(function (g) { return g.tight && !g.gap; }).map(function (g) { return { atStation: !!(P1[g.i].s || P1[(g.i + 1) % n1].s) }; });
   }
 
+  // ---------- WATER ----------
+  // Lakes and rivers are their own things on the map. Each habitat counts the water inside
+  // its own outline; water outside every habitat is open water. A habitat that needs water
+  // gets a starting lake (home lake) in its middle, sized to the need. The 25% extra goes to land.
+  var waterSel = null, waterEdit = null, lastWater = null;
+  var WATER_FILL = '#a6d3ec', WATER_EDGE = '#5d9cc2';
+  function bezOpen(L, i) {
+    var n = L.length, p0 = L[Math.max(0, i - 1)], p1 = L[i], p2 = L[i + 1], p3 = L[Math.min(n - 1, i + 2)];
+    var d01 = Math.hypot(p1.x - p0.x, p1.y - p0.y), d12 = Math.hypot(p2.x - p1.x, p2.y - p1.y), d23 = Math.hypot(p3.x - p2.x, p3.y - p2.y);
+    var k1 = d12 / 3 / ((d01 + d12) || 1), k2 = d12 / 3 / ((d12 + d23) || 1);
+    return [p1, { x: p1.x + (p2.x - p0.x) * k1, y: p1.y + (p2.y - p0.y) * k1 }, { x: p2.x - (p3.x - p1.x) * k2, y: p2.y - (p3.y - p1.y) * k2 }, p2];
+  }
+  function lineSamples(L, per) {
+    var out = [];
+    for (var i = 0; i < L.length - 1; i++) { var b = bezOpen(L, i); for (var k = 0; k < per; k++) out.push(bezAt(b, k / per)); }
+    out.push(L[L.length - 1]);
+    return out;
+  }
+  // a river is a bendy line with a width; its outline is the line widened, with round ends
+  function riverPoly(wb) {
+    var L = wb.line.map(function (q) { return { x: wb.x + q.x, y: wb.y + q.y }; }), s = lineSamples(L, 6), h = wb.w / 2, left = [], right = [], n = s.length;
+    var tan = function (i) { var a = s[Math.max(0, i - 1)], b = s[Math.min(n - 1, i + 1)], tx = b.x - a.x, ty = b.y - a.y, tl = Math.hypot(tx, ty) || 1; return { x: tx / tl, y: ty / tl }; };
+    s.forEach(function (q, i) { var t = tan(i); left.push({ x: q.x - t.y * h, y: q.y + t.x * h }); right.push({ x: q.x + t.y * h, y: q.y - t.x * h }); });
+    function cap(c, t, from) {
+      var out = [];
+      [30, 60, 90, 120, 150].forEach(function (a) {
+        a = (from + a) * Math.PI / 180;
+        // in the frame of the line: along = t, across = (-t.y, t.x)
+        var ca = Math.cos(a), sa = Math.sin(a);
+        out.push({ x: c.x + h * (ca * -t.y + sa * t.x), y: c.y + h * (ca * t.x + sa * t.y) });
+      });
+      return out;
+    }
+    var tEnd = tan(n - 1), tStart = tan(0);
+    return left.concat(cap(s[n - 1], tEnd, 0), right.reverse(), cap(s[0], tStart, 180));
+  }
+  function waterPoly(wb) {
+    if (wb.kind === 'river') return riverPoly(wb);
+    return outlineSamples(wb.pts, 6).map(function (q) { return { x: wb.x + q.x, y: wb.y + q.y }; });
+  }
+  function waterArea(wb) { return polyArea(waterPoly(wb)); }
+  function polyD(P) { return 'M' + P.map(function (q) { return f1(q.x) + ' ' + f1(q.y); }).join('L') + 'Z'; }
+  function bboxOf(P) {
+    var b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    P.forEach(function (q) { b.x0 = Math.min(b.x0, q.x); b.y0 = Math.min(b.y0, q.y); b.x1 = Math.max(b.x1, q.x); b.y1 = Math.max(b.y1, q.y); });
+    return b;
+  }
+  function inPoly(P, x, y) {
+    var c = false;
+    for (var i = 0, j = P.length - 1; i < P.length; j = i++) {
+      if ((P[i].y > y) !== (P[j].y > y) && x < (P[j].x - P[i].x) * (y - P[i].y) / (P[j].y - P[i].y) + P[i].x) c = !c;
+    }
+    return c;
+  }
+  // every habitat's outline, from the saved plan (used while changing things)
+  function habPolysState(p) {
+    var Lm = p.layout, out = [];
+    if (!Lm || !Lm.pos) return out;
+    p.habitats.forEach(function (h, i) {
+      var seed = 'h' + h.id, pos = Lm.pos[seed], inf = habitatInfo(h);
+      if (!pos || inf.aquarium) return;
+      var pts = pos.shape ? scaleShape(pos.shape, inf.area) : defaultShape(seed, Math.sqrt(Math.max(inf.area, 16) / Math.PI));
+      var P = outlineSamples(pts, 6).map(function (q) { return { x: pos.x + q.x, y: pos.y + q.y }; });
+      out.push({ seed: seed, h: h, num: i + 1, inf: inf, P: P, bb: bboxOf(P), pos: pos });
+    });
+    return out;
+  }
+  // every habitat's outline, from the layout being drawn
+  function habPolysLayout(R) {
+    var out = [];
+    R.circles.forEach(function (c) {
+      if (c.type !== 'habitat' || !c.unit) return;
+      var pts = c.shape || defaultShape(c.seed, Math.sqrt(c.A / Math.PI));
+      var P = outlineSamples(pts, 6).map(function (q) { return { x: c.x + q.x, y: c.y + q.y }; });
+      out.push({ seed: c.seed, h: c.unit.h, num: c.unit.num, inf: { water: c.unit.water, deep: c.unit.deep, base: c.unit.base, area: c.A }, P: P, bb: bboxOf(P) });
+    });
+    return out;
+  }
+  // How much water is inside each habitat, how much is open water, and where each lake or river sits.
+  // Worked out on a fine grid, so overlapping water is only counted once.
+  function waterStats(habs, bodies) {
+    var res = { hab: {}, open: 0, body: {} };
+    if (!bodies || !bodies.length) return res;
+    var B = bodies.map(function (wb) { var P = waterPoly(wb); return { wb: wb, P: P, bb: bboxOf(P) }; });
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    B.forEach(function (b) { x0 = Math.min(x0, b.bb.x0); y0 = Math.min(y0, b.bb.y0); x1 = Math.max(x1, b.bb.x1); y1 = Math.max(y1, b.bb.y1); res.body[b.wb.id] = { total: 0, by: {} }; });
+    var cell = Math.max(0.8, Math.sqrt((x1 - x0) * (y1 - y0) / 160000)), ca = cell * cell;
+    for (var y = y0 + cell / 2; y < y1; y += cell) {
+      for (var x = x0 + cell / 2; x < x1; x += cell) {
+        var hit = null;
+        for (var k = 0; k < B.length; k++) {
+          var b = B[k];
+          if (x < b.bb.x0 || x > b.bb.x1 || y < b.bb.y0 || y > b.bb.y1 || !inPoly(b.P, x, y)) continue;
+          (hit = hit || []).push(b);
+        }
+        if (!hit) continue;
+        var hs = null;
+        for (var m = 0; m < habs.length; m++) {
+          var H = habs[m];
+          if (x < H.bb.x0 || x > H.bb.x1 || y < H.bb.y0 || y > H.bb.y1 || !inPoly(H.P, x, y)) continue;
+          hs = H.seed; break;
+        }
+        if (hs) res.hab[hs] = (res.hab[hs] || 0) + ca; else res.open += ca;
+        for (k = 0; k < hit.length; k++) { var r = res.body[hit[k].wb.id]; r.total += ca; if (hs) r.by[hs] = (r.by[hs] || 0) + ca; }
+      }
+    }
+    return res;
+  }
+  function waterTol(need) { return Math.max(3, need * 0.004); }
+  // how much water each habitat is short of
+  function shortfalls(habs, st, exact) {
+    var out = {};
+    habs.forEach(function (H) {
+      var need = H.inf.water || 0;
+      if (need <= 0) return;
+      var have = st.hab[H.seed] || 0;
+      if (have < need - (exact ? 0.5 : waterTol(need))) out[H.seed] = need - have;
+    });
+    return out;
+  }
+  function newLake(cx, cy, area, home, need) {
+    return { id: 'wa' + uid(), kind: 'lake', x: cx, y: cy, pts: scaleShape(defaultShape('lake' + uid(), 10), Math.max(area, 20)), home: home || null, forNeed: need || 0 };
+  }
+  // the starting lakes for a layout nobody has changed by hand
+  function autoLakes(R) {
+    var out = [];
+    R.circles.forEach(function (c) {
+      if (c.type !== 'habitat' || !c.unit || !(c.unit.water > 0)) return;
+      var wl = newLake(c.x, c.y, c.unit.water * 1.02, c.seed, c.unit.water);
+      wl.id = 'wa' + c.seed;
+      wl.pts = scaleShape(defaultShape('lake' + c.seed, 10), c.unit.water * 1.02);
+      out.push(wl);
+    });
+    return out;
+  }
+  // which lakes and rivers sit entirely inside one habitat (they move with it)
+  function containedWater(p) {
+    var Lm = p.layout, out = [];
+    if (!Lm || !Lm.water || !Lm.water.length) return out;
+    var st = waterStats(habPolysState(p), Lm.water);
+    Lm.water.forEach(function (wb) {
+      var r = st.body[wb.id];
+      if (!r || !r.total) return;
+      Object.keys(r.by).forEach(function (s) { if (r.by[s] >= r.total * 0.97) out.push({ wb: wb, seed: s }); });
+    });
+    return out;
+  }
+  function snapPos(p) { var o = {}, pos = p.layout && p.layout.pos; if (pos) Object.keys(pos).forEach(function (k) { o[k] = { x: pos[k].x, y: pos[k].y }; }); return o; }
+  // after habitats have moved, bring along the water that was entirely inside each one
+  function followWater(p, inside, before) {
+    var pos = p.layout.pos;
+    inside.forEach(function (c) {
+      var now = pos[c.seed], was = before[c.seed];
+      if (now && was && (now.x !== was.x || now.y !== was.y)) { c.wb.x += now.x - was.x; c.wb.y += now.y - was.y; }
+    });
+  }
+  // Keep every habitat supplied: starting lakes follow the animals' needs, a habitat that's
+  // short of water gets a lake in its middle, and a habitat whose water has eaten into its
+  // minimum land grows (keeping its shape) and pushes its neighbours aside.
+  function settleWater(p, noGrow) {
+    var Lm = p.layout;
+    if (!Lm || !Lm.manual) return false;
+    Lm.water = Lm.water || [];
+    var any = false;
+    for (var round = 0; round < 5; round++) {
+      var habs = habPolysState(p), st = waterStats(habs, Lm.water), did = false;
+      habs.forEach(function (H) {
+        var need = H.inf.water || 0, have = st.hab[H.seed] || 0;
+        var homes = Lm.water.filter(function (w) { return w.home === H.seed; }), home = null;
+        homes.forEach(function (w) {
+          var r = st.body[w.id], inside = r && r.total && (r.by[H.seed] || 0) >= r.total * 0.97;
+          if (inside && !home) home = w; else w.home = null; // water left behind is no longer this habitat's own
+        });
+        if (home && Math.abs((home.forNeed || 0) - need) > 1) {
+          // the animals changed: the starting lake changes by the same amount
+          var target = waterArea(home) + (need - (home.forNeed || 0));
+          home.forNeed = need;
+          if (target < 20) Lm.water.splice(Lm.water.indexOf(home), 1); else home.pts = scaleShape(home.pts, target);
+          did = true; return;
+        }
+        if (need > 0 && have < need - waterTol(need)) {
+          var add = (need - have) * 1.04 + 10;
+          if (home) home.pts = scaleShape(home.pts, waterArea(home) + add);
+          else Lm.water.push(newLake(H.pos.x, H.pos.y, add, H.seed, need));
+          did = true;
+        }
+      });
+      if (!noGrow && !did) {
+        habs.forEach(function (H) {
+          var landMin = H.inf.base - (H.inf.water || 0), have = st.hab[H.seed] || 0, land = H.inf.area - have;
+          if (land >= landMin - Math.max(8, landMin * 0.01)) return;
+          var inside = containedWater(p), before = snapPos(p);
+          H.h.size = Math.ceil(have + landMin + 10);
+          if (layoutCache.result) makeRoom(Lm, H.seed, H.pos);
+          followWater(p, inside, before);
+          did = true;
+        });
+      }
+      if (!did) break;
+      any = true;
+    }
+    return any;
+  }
+  // Change a lake or river (setAt(0) = as it was, setAt(1) = the full change). If the change
+  // would leave a habitat short of water, it stops at the last point where none is short.
+  function guardedWaterEdit(p, setAt) {
+    var Lm = p.layout;
+    if (!Lm.water || !Lm.water.length) { setAt(1); return null; }
+    var check = function () { var habs = habPolysState(p); return shortfalls(habs, waterStats(habs, Lm.water), true); };
+    setAt(0);
+    var before = check();
+    var worse = function () { var s = check(); return Object.keys(s).filter(function (k) { return s[k] > (before[k] || 0) + 2; })[0]; };
+    setAt(1);
+    var bad = worse();
+    if (!bad) return null;
+    var lo = 0, hi = 1;
+    for (var it = 0; it < 9; it++) { var m = (lo + hi) / 2; setAt(m); if (worse()) hi = m; else lo = m; }
+    setAt(lo);
+    var H = habPolysState(p).filter(function (x) { return x.seed === bad; })[0];
+    return H ? 'Habitat ' + H.num : 'a habitat';
+  }
+  function findWater(p, id) { var W = (p.layout && p.layout.water) || []; return W.filter(function (w) { return w.id === id; })[0]; }
+  function moveWater(id, dx, dy) {
+    var p = plan(); toManual(p);
+    var wb = findWater(p, id);
+    if (!wb) return;
+    var x0 = wb.x, y0 = wb.y;
+    var who = guardedWaterEdit(p, function (t) { wb.x = x0 + dx * t; wb.y = y0 + dy * t; });
+    wb.edited = true;
+    changed();
+    if (who) toast('Stopped there: moving it further would leave ' + who + ' short of water');
+  }
+  function stretchWater(id, k, dx, dy) {
+    var p = plan(); toManual(p);
+    var wb = findWater(p, id);
+    if (!wb) return;
+    var arr = wb.kind === 'river' ? wb.line : wb.pts, o = { x: arr[k].x, y: arr[k].y };
+    var who = guardedWaterEdit(p, function (t) { arr[k] = { x: o.x + dx * t, y: o.y + dy * t }; });
+    if (waterArea(wb) < 20) { arr[k] = o; toast('That’s as small as it can go'); }
+    wb.edited = true;
+    changed();
+    if (who) toast('Stopped there: making it smaller would leave ' + who + ' short of water');
+  }
+  function addWater(kind) {
+    var p = plan();
+    if (!p.habitats.length && !p.exhibits.length) { toast('Add some animals first'); return; }
+    var Lm = toManual(p), LR = layoutCache.result;
+    Lm.water = Lm.water || [];
+    var right = -Infinity, top = Infinity;
+    if (LR && LR.R) {
+      LR.R.circles.forEach(function (c) { right = Math.max(right, c.x + c.r); top = Math.min(top, c.y - c.r); });
+      LR.R.ents.forEach(function (e) { right = Math.max(right, e.x + e.w); });
+      (LR.R.plazas || []).forEach(function (q) { right = Math.max(right, q.x + q.w); });
+    }
+    if (right === -Infinity) { right = 0; top = 0; }
+    var wb;
+    if (kind === 'lake') { wb = newLake(right + 40, top + 30, 700, null, 0); }
+    else {
+      wb = { id: 'wr' + uid(), kind: 'river', x: right + 30, y: top + 50, w: 10, home: null, forNeed: 0, line: [] };
+      for (var i = 0; i < 6; i++) wb.line.push({ x: i * 24, y: [0, 14, 4, -12, -4, 10][i] }); // a gentle S-bend to start
+    }
+    wb.edited = true;
+    Lm.water.push(wb);
+    waterSel = wb.id; shapeSel = null;
+    changed();
+    toast((kind === 'lake' ? 'Lake' : 'River') + ' added. Drag it where you want it, and drag the white dots to reshape it');
+  }
+  function waterAction(act) {
+    var p = plan(), wb = waterSel && findWater(p, waterSel);
+    if (act === 'done' || !wb) { waterSel = null; render(); return; }
+    if (act === 'delete') {
+      var W = p.layout.water, i = W.indexOf(wb), habs = habPolysState(p);
+      var before = shortfalls(habs, waterStats(habs, W), true);
+      W.splice(i, 1);
+      var after = shortfalls(habs, waterStats(habs, W), true), bad = Object.keys(after).filter(function (k) { return after[k] > (before[k] || 0) + 2; })[0];
+      if (bad) {
+        W.splice(i, 0, wb);
+        var H = habs.filter(function (x) { return x.seed === bad; })[0];
+        toast((H ? 'Habitat ' + H.num : 'A habitat') + ' needs this water. Shrink or move it instead, or add other water there first');
+        return;
+      }
+      waterSel = null;
+      changed(); toast('Water removed');
+    }
+  }
+  function hasWaterEdits(p) { return !!(p.layout && p.layout.water && p.layout.water.some(function (w) { return w.edited || !w.home; })); }
+
   // ---------- drawing ----------
   function f1(n) { return Math.round(n * 10) / 10; }
   // smooth closed or open curve through points (Catmull-Rom as Bezier)
@@ -1706,6 +2006,12 @@
     var p = plan(), LR = computeLayout(units, themeNames, p), R = LR.R, S = LR.S, bb = LR.bb;
     var free = true;
     if (editRide && !findRide(p, editRide)) { editRide = null; delMode = false; }
+    // water, and how it's shared between habitats
+    var W = LR.water || [], habPolys = habPolysLayout(R), wst = waterStats(habPolys, W);
+    lastWater = { stats: wst, W: W, habs: habPolys };
+    if (waterSel && !W.some(function (w) { return w.id === waterSel; })) waterSel = null;
+    var wPolys = W.map(function (wb) { return { wb: wb, P: waterPoly(wb) }; });
+    wPolys.forEach(function (o) { var b = bboxOf(o.P); var x0 = Math.min(bb.x, b.x0 - 6), y0 = Math.min(bb.y, b.y0 - 6), x1 = Math.max(bb.x + bb.w, b.x1 + 6), y1 = Math.max(bb.y + bb.h, b.y1 + 6); bb = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }; });
     // ride tracks (worked out first so the map can be made big enough for them)
     var tracks = ridesOf(p).map(function (rd) { var P = trackPts(rd); return { rd: rd, sp: rideSpecs[rd.type], P: P, segs: trackGeo(P, rideSpecs[rd.type]), ang: stationAngles(rd) }; });
     tracks.forEach(function (t) {
@@ -1721,6 +2027,8 @@
     themeNames.forEach(function (t, i) { colorOf[t] = THEME_COLORS[i % THEME_COLORS.length]; });
     var svg = '<svg class="zoo-map" viewBox="' + vb.map(f1).join(' ') + '" role="img" aria-label="Layout concept for ' + esc(p.name) + '" xmlns="http://www.w3.org/2000/svg">';
     svg += '<rect x="' + f1(vb[0]) + '" y="' + f1(vb[1]) + '" width="' + f1(vb[2]) + '" height="' + f1(vb[3]) + '" fill="#f7f3ea"/>';
+    if (wPolys.length) svg += '<defs><clipPath id="zoo-water">' + wPolys.map(function (o) { return '<path d="' + polyD(o.P) + '"/>'; }).join('') + '</clipPath></defs>';
+    var labelSvg = '';
     function shape(c, grow, fill, extraAttr) {
       if (c.shape) return '<path d="' + outlineD(c.x, c.y, c.shape, grow) + '" fill="' + fill + '"' + (extraAttr || '') + '/>';
       if (free) return '<path d="' + blob({ x: c.x, y: c.y, r: c.r + grow, seed: c.seed }, 1) + '" fill="' + fill + '"' + (extraAttr || '') + '/>';
@@ -1755,17 +2063,36 @@
     R.circles.forEach(function (c) {
       if (c.type === 'station' || c.type === 'part') return;
       var g = '<g class="drag" data-drag="c|' + esc(c.seed) + '"><title>' + esc(c.title || '') + (c.type === 'staff' ? ' (drag to move, tap to remove)' : c.type === 'habitat' || c.type === 'aquarium' ? ' (drag to move, tap to change its shape)' : ' (drag to move)') + '</title>';
-      if (c.type === 'habitat') g += shape(c, 0, colorOf[c.theme], ' stroke="#4f5f47" stroke-width="0.9" data-shape="' + esc(c.seed) + '"') + label(c, c.short, '#1f2b1c');
+      if (c.type === 'habitat') { g += shape(c, 0, colorOf[c.theme], ' stroke="#4f5f47" stroke-width="0.9" data-shape="' + esc(c.seed) + '"'); labelSvg += label(c, c.short, '#1f2b1c'); }
       else if (c.type === 'aquarium') {
         g += shape(c, 0, '#9ccbe3', ' stroke="#2f6680" stroke-width="1.1" data-shape="' + esc(c.seed) + '"');
         if (c.r > c.D) g += '<line x1="' + f1(c.x - c.r * 0.8) + '" y1="' + f1(c.y) + '" x2="' + f1(c.x + c.r * 0.8) + '" y2="' + f1(c.y) + '" stroke="#d9c79e" stroke-width="' + S.P + '" stroke-linecap="round"/>';
-        g += label(c, c.short, '#123445');
+        labelSvg += label(c, c.short, '#123445');
       }
       else if (c.type === 'walk') g += rectFor(c, c.bw, c.bd, colorOf[c.theme], '#4f5f47', ' stroke-dasharray="3 2"') + label(c, c.short, '#1f2b1c');
       else if (c.type === 'exhibits') g += rectFor(c, c.bw, c.bd, '#ece6d8', '#8a826f', '') + label(c, c.count + (c.count === 1 ? ' exhibit' : ' exhibits'), '#4a4436');
       else if (c.type === 'staff') g += box(c, S.staffW, S.staffD, '#9b8db3', '#6c5e85', 'Staff', '#fff');
       svg += g + '</g>';
     });
+    // water: edges first, then fills on top, so overlapping water reads as one
+    wPolys.forEach(function (o) { svg += '<path d="' + polyD(o.P) + '" fill="none" stroke="' + WATER_EDGE + '" stroke-width="1.8" stroke-linejoin="round"/>'; });
+    wPolys.forEach(function (o) {
+      var r = wst.body[o.wb.id] || { total: 0, by: {} }, where = Object.keys(r.by).map(function (sd) { var hx = habPolys.filter(function (x) { return x.seed === sd; })[0]; return hx ? fmt(r.by[sd]) + ' m² in Habitat ' + hx.num : ''; }).filter(Boolean);
+      var open = r.total - Object.keys(r.by).reduce(function (a, k) { return a + r.by[k]; }, 0);
+      if (open > 4) where.push(fmt(open) + ' m² open water');
+      svg += '<g class="drag water" data-drag="w|' + esc(o.wb.id) + '"><title>' + (o.wb.kind === 'river' ? 'River' : 'Lake') + ' · ' + fmt(waterArea(o.wb)) + ' m²' + (where.length ? ': ' + where.join(', ') : '') + ' (drag to move, tap to reshape)</title>' +
+        '<path data-water="' + esc(o.wb.id) + '" d="' + polyD(o.P) + '" fill="' + WATER_FILL + '"/></g>';
+    });
+    if (wPolys.length) {
+      // habitat edges across water (where the barrier would go), and paths over water as bridges
+      habPolys.forEach(function (H) { svg += '<path d="' + polyD(H.P) + '" fill="none" stroke="#3f4f38" stroke-width="1.1" stroke-dasharray="2.4 1.8" clip-path="url(#zoo-water)" pointer-events="none"/>'; });
+      lines.forEach(function (l) {
+        var d = smoothPath(l, false);
+        svg += '<path d="' + d + '" fill="none" stroke="#8b7a55" stroke-width="' + (S.P + 2.4) + '" stroke-linecap="butt" clip-path="url(#zoo-water)" pointer-events="none"/>' +
+          '<path d="' + d + '" fill="none" stroke="#d9c79e" stroke-width="' + S.P + '" stroke-linecap="round" clip-path="url(#zoo-water)" pointer-events="none"/>';
+      });
+    }
+    svg += '<g pointer-events="none">' + labelSvg + '</g>';
     R.plazas.forEach(function (pz, i) {
       svg += '<g class="drag" data-drag="p|' + esc(pz.id || ('auto' + i)) + '"><title>Guest plaza: 2 food, 2 drink, gift shop, toilet (drag to move' + (pz.mine ? ', tap to remove' : '') + ')</title>' + box(pz, S.plazaW, S.plazaD, '#f0b46a', '#b97a2e', 'Plaza', '#4a2f0c') + '</g>';
     });
@@ -1801,6 +2128,17 @@
           '<circle cx="' + f1(q.x) + '" cy="' + f1(q.y) + '" r="' + (loose ? 4.6 : 3.2) + '" fill="' + (loose ? t.rd.color : '#fff') + '" stroke="' + (loose ? '#fff' : t.rd.color) + '" stroke-width="1.4"/></g>';
       });
     });
+    // stretch points of the lake or river being reshaped
+    var wsel = waterSel && W.filter(function (w) { return w.id === waterSel; })[0];
+    waterEdit = wsel ? { wb: wsel } : null;
+    var waterPtsSvg = '';
+    if (wsel) {
+      var wl = wsel.kind === 'river' ? wsel.line : wsel.pts;
+      waterPtsSvg += '<path d="' + polyD(waterPoly(wsel)) + '" fill="none" stroke="#1d4d6b" stroke-width="0.9" stroke-dasharray="2.5 2" pointer-events="none"/>';
+      wl.forEach(function (q, k) {
+        waterPtsSvg += '<g class="drag shape-pt" data-drag="wp|' + esc(wsel.id) + '|' + k + '"><title>Stretch point (drag to change the shape)</title><circle cx="' + f1(wsel.x + q.x) + '" cy="' + f1(wsel.y + q.y) + '" r="3.6" fill="#fff" stroke="#1d4d6b" stroke-width="1.3"/></g>';
+      });
+    }
     // stretch points of the habitat being reshaped
     var sc = shapeSel && R.circles.filter(function (c) { return c.seed === shapeSel && (c.type === 'habitat' || c.type === 'aquarium'); })[0];
     if (shapeSel && !sc) shapeSel = null;
@@ -1848,7 +2186,7 @@
       svg += '<g class="drag" data-drag="e|' + i + '"><title>Entrance ' + (i + 1) + ' (drag to move)</title><rect x="' + f1(e.x) + '" y="' + f1(e.y) + '" width="' + f1(e.w) + '" height="' + f1(e.d) + '" rx="4" fill="#3d6a47"/>' +
         '<text x="' + f1(e.cx) + '" y="' + f1(e.cy) + '" font-size="6.5" fill="#fff" text-anchor="middle" dominant-baseline="central">Entrance</text></g>';
     });
-    svg += shapeSvg;
+    svg += shapeSvg + waterPtsSvg;
     var sx = vb[0] + pad, sy = vb[1] + vb[3] - 9;
     svg += '<rect x="' + f1(sx) + '" y="' + f1(sy - 1.5) + '" width="50" height="3" fill="#22301f"/><text x="' + f1(sx + 55) + '" y="' + f1(sy) + '" font-size="7" fill="#22301f" dominant-baseline="central">50 m</text>';
     svg += '</svg>';
@@ -1856,6 +2194,13 @@
     var area = bb.w * bb.h, mapA = S.map * S.map;
     var html = '<section class="card map-card"><div class="map-head"><h2>Layout concept</h2><span class="sub">about ' + fmt(bb.w) + ' × ' + fmt(bb.h) + ' m · ' + (Math.round(area / mapA * 1000) / 10) + '% of the map</span><span class="map-tools"><button type="button" class="secondary icon" id="undo" title="Undo" aria-label="Undo"' + (undoStack.length ? '' : ' disabled') + '>&#8630;</button><button type="button" class="secondary icon" id="redo" title="Redo" aria-label="Redo"' + (redoStack.length ? '' : ' disabled') + '>&#8631;</button><button type="button" class="secondary" id="regen">Regenerate plan</button></span></div>';
     html += '<div class="map-wrap">' + svg + '</div>';
+    if (wsel) {
+      var wr = wst.body[wsel.id] || { total: 0, by: {} }, parts2 = Object.keys(wr.by).map(function (sd) { var hx = habPolys.filter(function (x) { return x.seed === sd; })[0]; return hx ? fmt(wr.by[sd]) + ' m² in Habitat ' + hx.num : ''; }).filter(Boolean);
+      var open2 = wr.total - Object.keys(wr.by).reduce(function (a, k) { return a + wr.by[k]; }, 0);
+      if (open2 > 4) parts2.push(fmt(open2) + ' m² open water');
+      html += '<div class="shape-bar water-bar"><span><b>' + (wsel.kind === 'river' ? 'River' : 'Lake') + ' · ' + fmt(waterArea(wsel)) + ' m²</b>' + (parts2.length ? ' <span class="muted">(' + parts2.join(', ') + ')</span>' : '') + '. Drag it to move it, or drag the white dots to reshape it.</span>' +
+        '<span class="ride-btns"><button type="button" class="secondary small danger" data-water-act="delete">Delete</button><button type="button" class="secondary small" data-water-act="done">Done</button></span></div>';
+    }
     if (sc) {
       var su = sc.unit;
       html += '<div class="shape-bar"><span><b>' + (su.aquarium ? 'Aquarium ' : 'Habitat ') + su.num + '</b>: drag the white dots to change its shape. <b id="shape-area">' + fmt(su.area) + ' m²</b> <span class="muted">(minimum ' + fmt(su.base) + ' m²)</span></span>' +
@@ -1866,6 +2211,7 @@
       '<span class="lg"><i style="background:#f0b46a"></i>Plaza</span><span class="lg"><i style="background:#9b8db3"></i>Staff area</span>' +
       '<span class="lg"><i style="background:#3d6a47"></i>Entrance</span><span class="lg"><i style="background:#d9c79e"></i>Path</span>';
     var nPl = R.plazas.length, nSt = R.circles.filter(function (c) { return c.type === 'staff'; }).length;
+    if (W.length) legend += '<span class="lg"><i style="background:' + WATER_FILL + ';border-color:' + WATER_EDGE + '"></i>Water</span>';
     ridesOf(p).forEach(function (rd) { legend += '<span class="lg"><i style="background:' + rd.color + '"></i>' + esc(rd.name) + '</span>'; });
     if (tracks.some(function (t) { return t.segs.some(function (g) { return g.tight && !g.gap; }); })) legend += '<span class="lg"><i style="background:' + TIGHT_COLOR + '"></i>Bend too tight</span>';
     html += '<div class="legend">' + legend + '</div>';
@@ -1886,8 +2232,10 @@
     });
     html += key + '</div>';
     html += '<p class="small muted map-note">' + nPl + ' plaza' + (nPl === 1 ? '' : 's') + ', ' + nSt + ' staff area' + (nSt === 1 ? '' : 's') + ', ' +
-      LR.nEnt + ' entrance' + (LR.nEnt === 1 ? '' : 's') + (LR.auto ? ' (suggested)' : '') + '. Numbers match the habitat list below. Hover over a shape for details, or tap a habitat to change its shape.</p>';
-    if (LR.issues.length) html += '<div class="note bad">' + LR.issues.map(esc).join('<br>') + '</div>';
+      LR.nEnt + ' entrance' + (LR.nEnt === 1 ? '' : 's') + (LR.auto ? ' (suggested)' : '') + '. Numbers match the habitat list below. Hover over a shape for details, or tap a habitat or water to change its shape.</p>';
+    var wShort = shortfalls(habPolys, wst), issues = LR.issues.slice();
+    Object.keys(wShort).forEach(function (sd) { var hx = habPolys.filter(function (x) { return x.seed === sd; })[0]; if (hx) issues.push('Habitat ' + hx.num + ' needs ' + fmt(wShort[sd]) + ' m² more water.'); });
+    if (issues.length) html += '<div class="note bad">' + issues.map(esc).join('<br>') + '</div>';
     return html + '</section>';
   }
 
@@ -1959,6 +2307,12 @@
       drag.dx = q.x - drag.x0; drag.dy = q.y - drag.y0;
       drag.g.setAttribute('transform', 'translate(' + drag.dx.toFixed(1) + ' ' + drag.dy.toFixed(1) + ')');
       var dp = drag.g.getAttribute('data-drag').split('|');
+      if (dp[0] === 'wp' && waterEdit && waterEdit.wb.id === dp[1]) {
+        var wb2 = JSON.parse(JSON.stringify(waterEdit.wb)), arr2 = wb2.kind === 'river' ? wb2.line : wb2.pts, kk = Number(dp[2]);
+        arr2[kk] = { x: arr2[kk].x + drag.dx, y: arr2[kk].y + drag.dy };
+        var wel = svg.querySelector('[data-water="' + dp[1] + '"]');
+        if (wel) wel.setAttribute('d', polyD(waterPoly(wb2)));
+      }
       if (dp[0] === 's' && shapeEdit && shapeEdit.seed === dp[1]) {
         var pts2 = shapeEdit.pts.map(function (q) { return { x: q.x, y: q.y }; }), k = Number(dp[2]);
         pts2[k] = { x: pts2[k].x + drag.dx, y: pts2[k].y + drag.dy };
@@ -1974,7 +2328,7 @@
         var at = pt(e);
         if (tp.trk) { var tk = tp.trk.split('|'); tapTrack(tk[0], Number(tk[1]), at); }
         else if (editRide) tapOpenMap(at);
-        else if (shapeSel) { shapeSel = null; render(); }
+        else if (shapeSel || waterSel) { shapeSel = null; waterSel = null; render(); }
         return;
       }
       if (!drag || e.pointerId !== drag.id) return;
@@ -1989,7 +2343,11 @@
   }
   function moveItem(parts, dx, dy) {
     if (parts[0] === 's') { stretchPoint(parts[1], Number(parts[2]), dx, dy); return; }
+    if (parts[0] === 'w') { moveWater(parts[1], dx, dy); return; }
+    if (parts[0] === 'wp') { stretchWater(parts[1], Number(parts[2]), dx, dy); return; }
     var Lm = toManual(plan()), kind = parts[0], id = parts[1], LR = layoutCache.result;
+    // water entirely inside a habitat moves with it; shared water stays where it is
+    var inside = containedWater(plan()), before = snapPos(plan());
     var stn = kind === 'c' && findStation(plan(), id);
     if (stn) {
       stn.st.x += dx; stn.st.y += dy;
@@ -2010,6 +2368,7 @@
         if (auto) Lm.plazas.push({ id: 'pl' + uid(), x: auto.x + dx, y: auto.y + dy });
       }
     } else if (kind === 'e' && Lm.ents[Number(id)]) { Lm.ents[Number(id)].x += dx; Lm.ents[Number(id)].y += dy; }
+    followWater(plan(), inside, before);
     changed();
   }
   // Push neighbours just far enough out of the way of something that was dropped on them.
@@ -2027,7 +2386,10 @@
         var sp = shapeParts(0, 0, ref.shape);
         items.push({ r: sp.rin, ref: ref, ox: 0, oy: 0, fixed: fixed });
         sp.parts.forEach(function (q) { items.push({ r: q.r, ref: ref, ox: q.x, oy: q.y, fixed: fixed }); });
-      } else items.push({ r: c.r, ref: ref, ox: 0, oy: 0, fixed: fixed });
+      } else {
+        var hh = (c.type === 'habitat' || c.type === 'aquarium') && plan().habitats.filter(function (x) { return 'h' + x.id === c.seed; })[0];
+        items.push({ r: hh ? Math.sqrt(Math.max(habitatInfo(hh).area, 16) / Math.PI) : c.r, ref: ref, ox: 0, oy: 0, fixed: fixed });
+      }
     });
     for (var round = 0; round < 30; round++) {
       var moved = false;
@@ -2051,11 +2413,12 @@
     var isStaff = kind === 'c' && LR && LR.R.circles.some(function (c) { return c.seed === id && c.type === 'staff'; });
     var stn = kind === 'c' && findStation(plan(), id);
     if (kind === 'b') { tapBend(id, Number(parts[2])); return; }
+    if (kind === 'w') { waterSel = waterSel === id ? null : id; shapeSel = null; editRide = null; delMode = false; render(); return; }
     var hab = kind === 'c' && LR && LR.R.circles.filter(function (c) { return c.seed === id && (c.type === 'habitat' || c.type === 'aquarium'); })[0];
     // while redrawing a gap in a ride's track, taps on habitats place track (gondolas and monorails pass overhead)
     var er = editRide && findRide(plan(), editRide);
     if (hab && er && er.track && er.track.some(function (q) { return q.g; }) && at) { tapOpenMap(at); return; }
-    if (hab) { shapeSel = shapeSel === id ? null : id; editRide = null; delMode = false; render(); return; }
+    if (hab) { shapeSel = shapeSel === id ? null : id; waterSel = null; editRide = null; delMode = false; render(); return; }
     if (stn) {
       if (!window.confirm('Remove this ' + stn.ride.name + ' station?')) return;
       stn.ride.stations = stn.ride.stations.filter(function (q) { return q.id !== id; });
@@ -2131,6 +2494,13 @@
         '<button type="button" class="x" data-action="remove-member" data-h="' + h.id + '" data-i="' + idx + '" aria-label="Remove ' + esc(a.name) + '">×</button></li>';
     });
     html += '</ul>';
+    if (u.water > 0) {
+      var ws = lastWater && lastWater.stats, have = ws ? ws.hab['h' + h.id] || 0 : null, shares = [];
+      if (ws) lastWater.W.forEach(function (wb) { var r = ws.body[wb.id]; if (r && r.by['h' + h.id]) Object.keys(r.by).forEach(function (sd) { if (sd !== 'h' + h.id && r.by[sd] > 4 && shares.indexOf(sd) < 0) shares.push(sd); }); });
+      var shareNames = shares.map(function (sd) { var hx = lastWater.habs.filter(function (x) { return x.seed === sd; })[0]; return hx ? 'Habitat ' + hx.num : null; }).filter(Boolean);
+      html += '<div class="unit-water small">Land ' + fmt(u.area - (have === null ? u.water : have)) + ' m² · water ' + fmt(have === null ? u.water : have) + ' m² <span class="muted">(needs ' + fmt(u.water) + (u.deep > 0 ? ', ' + fmt(u.deep) + ' of it deep' : '') + ')</span>' +
+        (shareNames.length ? ' · <span class="muted">shares water with ' + shareNames.join(', ') + '</span>' : '') + '</div>';
+    }
     html += '<div class="unit-foot">' + themeSelect(u, 'h', h.id) + '</div>';
     if (u.problems.length) html += '<div class="note bad"><strong>These animals can’t share a habitat:</strong> ' + u.problems.map(esc).join(' ') + '</div>';
     u.needs.forEach(function (n) {
@@ -2228,6 +2598,8 @@
   // ---------- undo and redo ----------
   var undoStack = [], redoStack = [], lastSnap = null;
   function changed() {
+    var pw = plan();
+    if (pw.layout && pw.layout.manual) { try { settleWater(pw); } catch (err) { if (window.console) console.error(err); } }
     var now = JSON.stringify(state);
     if (lastSnap !== null && now !== lastSnap) {
       undoStack.push(lastSnap);
@@ -2274,12 +2646,14 @@
       if (e.target.closest('#redo')) return undoRedo(false);
       var rb = e.target.closest('button[data-ride-act]');
       if (rb) return rideAction(rb.getAttribute('data-ride-act'), rb.getAttribute('data-ride'));
+      var wbt = e.target.closest('button[data-water-act]');
+      if (wbt) return waterAction(wbt.getAttribute('data-water-act'));
       var sb = e.target.closest('button[data-shape-act]');
       if (sb) return shapeAction(sb.getAttribute('data-shape-act'));
       if (!e.target.closest('#regen')) return;
       var lost = lostOnRedraw(plan());
       if (lost && !window.confirm('Regenerating the plan will clear ' + lost + '. Regenerate anyway?')) return;
-      clearRides(plan()); shapeSel = null;
+      clearRides(plan()); shapeSel = null; waterSel = null;
       delete plan().layout;
       plan().setup.variant = (plan().setup.variant || 0) + 1;
       changed(); toast('New layout drawn');
@@ -2294,14 +2668,15 @@
       // new themes mean a new arrangement
       var lost = lostOnRedraw(plan());
       if (lost && !window.confirm('Changing the themes redraws the map and will clear ' + lost + '. Change anyway?')) { this.value = plan().setup.theme; return; }
-      clearRides(plan()); shapeSel = null;
+      clearRides(plan()); shapeSel = null; waterSel = null;
       if (plan().layout) toast('The map was redrawn for the new themes');
       plan().setup.theme = this.value; delete plan().layout; changed();
     });
     $('add-facility').addEventListener('change', function () {
       var k = this.value; this.value = '';
       if (!k) return;
-      if (k.indexOf('new:') === 0 || k.indexOf('st:') === 0) addStation(k); else addToMap(k);
+      if (k.indexOf('water:') === 0) addWater(k.slice(6));
+      else if (k.indexOf('new:') === 0 || k.indexOf('st:') === 0) addStation(k); else addToMap(k);
     });
     $('set-entrances').addEventListener('change', function () { plan().setup.entrances = this.value === 'auto' ? 'auto' : Number(this.value); changed(); });
 
@@ -2434,6 +2809,11 @@
     if (pos) Object.keys(pos).forEach(function (k) {
       var sh = pos[k] && pos[k].shape;
       if (sh && !(Array.isArray(sh) && sh.length >= 5 && sh.every(function (q) { return q && isFinite(q.x) && isFinite(q.y); }))) delete pos[k].shape;
+    });
+    if (p.layout && p.layout.water) p.layout.water = (Array.isArray(p.layout.water) ? p.layout.water : []).filter(function (w) {
+      if (!w || !isFinite(w.x) || !isFinite(w.y)) return false;
+      if (w.kind === 'river') return Array.isArray(w.line) && w.line.length >= 2 && w.w > 0;
+      return Array.isArray(w.pts) && w.pts.length >= 5;
     });
     // rides only exist on a hand-arranged map; drop anything broken
     p.rides = Array.isArray(p.rides) && p.layout && p.layout.manual ? p.rides.filter(function (rd) {

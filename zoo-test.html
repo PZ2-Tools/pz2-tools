@@ -439,12 +439,12 @@
       units.push({ kind: 'habitat', h: h, num: i + 1, keys: keys, area: inf.area, base: inf.base, aquarium: inf.aquarium,
         problems: inf.problems, needs: unmetNeeds(h.members), cands: unitCandidates(keys, type), override: themeOv || null });
     });
+    var walkNum = 0;
     p.exhibits.forEach(function (e) {
-      var a = model.animals[e.key];
-      var walk = a.types.some(function (t) { return /walkthrough/i.test(t); });
+      var walk = !!e.walk, keys = walk ? keysOf(e.members) : [e.key];
       var w = walk ? wkW : exW, d = walk ? wkD : exD;
-      units.push({ kind: 'exhibit', e: e, keys: [e.key], walk: walk, w: w, d: d, area: (w && d) ? w * d : 0,
-        cands: unitCandidates([e.key], type), override: (e.theme && e.theme[type]) || null });
+      units.push({ kind: 'exhibit', e: e, keys: keys, walk: walk, num: walk ? ++walkNum : 0, w: w, d: d, area: (w && d) ? w * d : 0,
+        cands: unitCandidates(keys, type), override: (e.theme && e.theme[type]) || null });
     });
     assignThemes(units, type);
     return units;
@@ -483,7 +483,7 @@
       var list = themes[t], area = list.reduce(function (s, u) { return s + u.area; }, 0);
       html += '<section class="card theme-card"><h2>' + esc(t) + ' <span class="sub">' + list.length + (list.length === 1 ? ' enclosure' : ' enclosures') + ' · ' + fmt(area) + ' m²</span></h2>';
       list.sort(function (x, y) { return (x.kind === y.kind ? 0 : x.kind === 'habitat' ? -1 : 1) || y.area - x.area; })
-        .forEach(function (u) { html += u.kind === 'habitat' ? habitatHtml(u, hab) : exhibitHtml(u); });
+        .forEach(function (u) { html += u.kind === 'habitat' ? habitatHtml(u, hab) : exhibitHtml(u, units); });
       html += '</section>';
     });
     panel.innerHTML = html;
@@ -534,7 +534,29 @@
     });
     return html + '</div>';
   }
-  function exhibitHtml(u) {
+  function swarms(e) { return e.members.reduce(function (s, m) { return s + (m.n || 1); }, 0); }
+  function walkMax() { return setting('Walkthrough Max Swarms') || 8; }
+  function walkHtml(u, allUnits) {
+    var e = u.e, size = (u.w && u.d) ? u.w + ' × ' + u.d + ' m' : 'size not set yet', total = swarms(e), max = walkMax();
+    var others = allUnits.filter(function (o) { return o.walk && o.e !== e; });
+    var html = '<div class="unit"><div class="unit-head"><span class="unit-title">Walkthrough ' + u.num + '</span>' +
+      '<span class="area">' + (u.area ? fmt(u.area) + ' m² ' : '') + '<span class="muted small">(' + size + ')</span></span></div><ul class="members">';
+    e.members.forEach(function (m, idx) {
+      var a = model.animals[m.key];
+      var moveOpts = '<option value="">Move to…</option>';
+      others.forEach(function (o) { moveOpts += '<option value="' + o.e.id + '">Walkthrough ' + o.num + ' (' + o.keys.map(nameOf).join(', ') + ')</option>'; });
+      if (e.members.length > 1) moveOpts += '<option value="__new">Its own walkthrough</option>';
+      html += '<li><span class="mname"><strong>' + esc(a.name) + '</strong></span>' +
+        '<label class="gsize">Swarms <input type="number" min="1" step="1" inputmode="numeric" data-action="swarms" data-e="' + e.id + '" data-i="' + idx + '" value="' + (m.n || 1) + '" aria-label="' + esc(a.name) + ' swarms"></label>' +
+        (others.length || e.members.length > 1 ? '<select data-action="move-walk" data-e="' + e.id + '" data-i="' + idx + '" aria-label="Move ' + esc(a.name) + '">' + moveOpts + '</select>' : '') +
+        '<button type="button" class="x" data-action="remove-walk-member" data-e="' + e.id + '" data-i="' + idx + '" aria-label="Remove ' + esc(a.name) + '">×</button></li>';
+    });
+    html += '</ul><div class="unit-foot">' + themeSelect(u, 'e', e.id) + '<span>' + total + ' of ' + max + ' swarms</span></div>';
+    if (total > max) html += '<div class="note bad">This walkthrough has ' + total + ' swarms. The limit is ' + max + '. Lower a number or move a butterfly to another walkthrough.</div>';
+    return html + '</div>';
+  }
+  function exhibitHtml(u, allUnits) {
+    if (u.walk) return walkHtml(u, allUnits);
     var e = u.e, a = model.animals[e.key];
     var size = (u.w && u.d) ? u.w + ' × ' + u.d + ' m' : 'size not set yet';
     return '<div class="unit"><div class="unit-head"><span class="unit-title"><span class="kind exhibit">' + (u.walk ? 'Walkthrough' : 'Exhibit') + '</span>' + esc(a.name) + '</span>' +
@@ -596,6 +618,7 @@
   }
 
   // ---------- actions ----------
+  function findExhibit(id) { return plan().exhibits.filter(function (x) { return x.id === id; })[0]; }
   function findHabitat(id) { return plan().habitats.filter(function (h) { return h.id === id; })[0]; }
   function changed() { save(); render(); }
 
@@ -629,10 +652,24 @@
       var h = plan().habitats.filter(function (x) { return x.members.some(function (m) { return m.key === k; }); }).pop();
       toast(nameOf(k) + (h && h.members.length > 1 ? ' added, sharing with ' + keysOf(h.members).filter(function (x) { return x !== k; }).map(nameOf).join(', ') : ' added'));
   }
+  function isWalk(k) { return model.animals[k].types.some(function (t) { return /walkthrough/i.test(t); }); }
   function addExhibitAnimal(k) {
-      plan().exhibits.push({ id: uid(), key: k, theme: {} });
+    var p = plan();
+    if (!isWalk(k)) {
+      p.exhibits.push({ id: uid(), key: k, theme: {} });
       changed();
-      toast(nameOf(k) + ' exhibit added');
+      return toast(nameOf(k) + ' exhibit added');
+    }
+    // Walkthroughs hold several swarms: add 1 swarm to one that has room.
+    var max = walkMax(), walks = p.exhibits.filter(function (e) { return e.walk; });
+    var room = function (e) { return swarms(e) + 1 <= max; };
+    var same = walks.filter(function (e) { return room(e) && e.members.some(function (m) { return m.key === k; }); })[0];
+    var target = same || walks.filter(room)[0];
+    if (same) { same.members.forEach(function (m) { if (m.key === k) m.n = (m.n || 1) + 1; }); }
+    else if (target) target.members.push({ key: k, n: 1 });
+    else p.exhibits.push(target = { id: uid(), walk: true, members: [{ key: k, n: 1 }], theme: {} });
+    changed();
+    toast(nameOf(k) + ' added to a walkthrough (' + swarms(target) + ' of ' + max + ' swarms)');
   }
   function wirePanel() {
 
@@ -643,6 +680,11 @@
         var h = findHabitat(b.getAttribute('data-h')), i = Number(b.getAttribute('data-i'));
         h.members.splice(i, 1);
         if (!h.members.length) p.habitats.splice(p.habitats.indexOf(h), 1);
+        changed();
+      } else if (act === 'remove-walk-member') {
+        var we = findExhibit(b.getAttribute('data-e'));
+        we.members.splice(Number(b.getAttribute('data-i')), 1);
+        if (!we.members.length) p.exhibits.splice(p.exhibits.indexOf(we), 1);
         changed();
       } else if (act === 'remove-exhibit') {
         p.exhibits = p.exhibits.filter(function (x) { return x.id !== b.getAttribute('data-e'); });
@@ -656,8 +698,20 @@
         var v = Math.floor(Number(s.value));
         mi.n = s.value.trim() !== '' && v >= 1 ? v : null;
         changed();
+      } else if (act === 'swarms') {
+        var sw = findExhibit(s.getAttribute('data-e')).members[Number(s.getAttribute('data-i'))];
+        var sv = Math.floor(Number(s.value));
+        sw.n = sv >= 1 ? sv : 1;
+        changed();
+      } else if (act === 'move-walk' && s.value) {
+        var wf = findExhibit(s.getAttribute('data-e')), wm = wf.members.splice(Number(s.getAttribute('data-i')), 1)[0];
+        if (s.value === '__new') p.exhibits.splice(p.exhibits.indexOf(wf) + 1, 0, { id: uid(), walk: true, members: [wm], theme: {} });
+        else findExhibit(s.value).members.push(wm);
+        if (!wf.members.length) p.exhibits.splice(p.exhibits.indexOf(wf), 1);
+        changed();
+        toast(nameOf(wm.key) + ' moved');
       } else if (act === 'theme') {
-        var target = s.getAttribute('data-h') ? findHabitat(s.getAttribute('data-h')) : p.exhibits.filter(function (x) { return x.id === s.getAttribute('data-e'); })[0];
+        var target = s.getAttribute('data-h') ? findHabitat(s.getAttribute('data-h')) : findExhibit(s.getAttribute('data-e'));
         target.theme = target.theme || {};
         if (s.value) target.theme[type] = s.value; else delete target.theme[type];
         changed();
@@ -692,13 +746,27 @@
         try {
           var j = JSON.parse(rd.result), s = j && j.app === 'pz2-zoo-planner' ? j.data : j;
           if (!valid(s)) throw new Error('bad');
-          s.plans.forEach(function (p) { p.habitats = (p.habitats || []).filter(function (h) { h.members = (h.members || []).filter(function (m) { return model.animals[m.key]; }); return h.members.length; }); p.exhibits = (p.exhibits || []).filter(function (x) { return model.animals[x.key]; }); });
+          s.plans.forEach(cleanPlan);
           if (!window.confirm('Replace the plans in this browser with the ' + s.plans.length + ' plan' + (s.plans.length === 1 ? '' : 's') + ' in this backup?')) return;
           state = s; changed(); toast('Backup restored');
         } catch (e) { window.alert('That file isn’t a Zoo Planner backup.'); }
       };
       rd.readAsText(f);
       this.value = '';
+    });
+  }
+
+  // Tidy a saved plan: drop animals no longer in the spreadsheet, and
+  // turn older single-butterfly walkthroughs into the multi-swarm kind.
+  function cleanPlan(p) {
+    var ok = function (m) { return model.animals[m.key]; };
+    p.habitats = (p.habitats || []).filter(function (h) { h.members = (h.members || []).filter(ok); return h.members.length; });
+    p.exhibits = (p.exhibits || []).map(function (x) {
+      if (!x.walk && x.key && model.animals[x.key] && isWalk(x.key)) return { id: x.id, walk: true, members: [{ key: x.key, n: 1 }], theme: x.theme || {} };
+      return x;
+    }).filter(function (x) {
+      if (x.walk) { x.members = (x.members || []).filter(ok); return x.members.length; }
+      return model.animals[x.key];
     });
   }
 
@@ -716,10 +784,7 @@
       warnings.map(function (w) { return '<li>' + esc(w) + '</li>'; }).join('') + '</ul></details>';
     state = load();
     // drop animals that are no longer in the spreadsheet
-    state.plans.forEach(function (p) {
-      p.habitats = p.habitats.filter(function (h) { h.members = h.members.filter(function (m) { return model.animals[m.key]; }); return h.members.length; });
-      p.exhibits = p.exhibits.filter(function (x) { return model.animals[x.key]; });
-    });
+    state.plans.forEach(cleanPlan);
     fillAddLists();
     wire();
     wirePanel();

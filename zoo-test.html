@@ -104,7 +104,12 @@
   .map-tools { margin-left: auto; display: inline-flex; gap: 6px; }
   .secondary.icon { font-size: 18px; line-height: 1; padding: 6px 11px; }
   .secondary:disabled { opacity: .4; cursor: default; }
-  .map-wrap { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #f7f3ea; }
+  .map-wrap { position: relative; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #f7f3ea; }
+  .zoo-map { touch-action: none; }
+  .zoom-ctl { position: absolute; bottom: 8px; right: 8px; display: grid; gap: 4px; }
+  .zoom-ctl button { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-size: 19px; line-height: 1; font-weight: 700; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .zoom-ctl button:hover { border-color: var(--accent); }
+  .zoo-map.panning { cursor: grabbing; }
   .zoo-map { user-select: none; -webkit-user-select: none; display: block; width: 100%; height: auto; max-height: 75vh; font-family: "DM Sans", system-ui, sans-serif; }
   .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 13px; }
   .legend .lg { display: inline-flex; align-items: center; gap: 6px; }
@@ -131,6 +136,8 @@
   .ride-help { margin: 0; }
   .ride .note { margin-top: 0; }
   .zoo-map .trk { cursor: pointer; }
+  .zoo-map .grip { cursor: move; }
+  .ride.hidden-ride .ride-head b { color: var(--muted); }
   .shape-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 10px; font-size: 14px; }
   .shape-bar .ride-btns { margin-left: auto; }
   .unit-water { margin-top: 6px; color: #2f6680; }
@@ -1257,8 +1264,9 @@
         var t = k / 16, q = bezAt(b, t);
         len += Math.hypot(q.x - last.x, q.y - last.y); last = q;
       }
-      for (k = 0; k <= 16; k++) rmin = Math.min(rmin, bezRadius(b, k / 16));
-      segs.push({ i: i, b: b, len: len, gap: P[i].g, rmin: rmin, tight: rmin < minR * 0.97,
+      var tAt = 0;
+      for (k = 0; k <= 16; k++) { var rr = bezRadius(b, k / 16); if (rr < rmin) { rmin = rr; tAt = k / 16; } }
+      segs.push({ i: i, b: b, len: len, gap: P[i].g, rmin: rmin, at: bezAt(b, tAt), tight: rmin < minR * 0.97,
         d: 'M' + f1(b[0].x) + ' ' + f1(b[0].y) + 'C' + f1(b[1].x) + ' ' + f1(b[1].y) + ',' + f1(b[2].x) + ' ' + f1(b[2].y) + ',' + f1(b[3].x) + ' ' + f1(b[3].y) });
     }
     return segs;
@@ -1476,10 +1484,11 @@
     list.forEach(function (rd) {
       var sp = rideSpecs[rd.type], P = trackPts(rd), segs = trackGeo(P, sp), editing = editRide === rd.id;
       var onTrack = P.filter(function (q) { return q.s; }).length, ns = rd.stations.length;
-      html += '<div class="ride' + (editing ? ' editing' : '') + '"><div class="ride-head"><i style="background:' + rd.color + '"></i><b>' + esc(rd.name) + '</b><span class="muted small">' + ns + ' station' + (ns === 1 ? '' : 's') + '</span>' +
+      html += '<div class="ride' + (editing ? ' editing' : '') + (rd.hidden ? ' hidden-ride' : '') + '"><div class="ride-head"><i style="background:' + rd.color + '"></i><b>' + esc(rd.name) + '</b><span class="muted small">' + ns + ' station' + (ns === 1 ? '' : 's') + '</span>' +
         '<span class="ride-btns"><button type="button" class="secondary small" data-ride-act="link" data-ride="' + rd.id + '"' + (ns ? '' : ' disabled') + '>Link stations</button>' +
         (segs.some(function (g) { return !g.gap && g.tight; }) ? '<button type="button" class="secondary small" data-ride-act="correct" data-ride="' + rd.id + '">Correct track</button>' : '') +
         (rd.track ? '<button type="button" class="secondary small" data-ride-act="edit" data-ride="' + rd.id + '">' + (editing ? 'Done' : 'Edit track') + '</button>' : '') +
+        '<button type="button" class="secondary small" data-ride-act="hide" data-ride="' + rd.id + '" aria-pressed="' + (rd.hidden ? 'true' : 'false') + '">' + (rd.hidden ? 'Show' : 'Hide') + '</button>' +
         '<button type="button" class="secondary small danger" data-ride-act="remove" data-ride="' + rd.id + '">Remove ride</button></span></div>';
       var notes = [];
       if (!ns) notes.push('No stations yet. Add one from <strong>Add to the map</strong>.');
@@ -1513,7 +1522,12 @@
       if (!left.length) toast(rd.name + ' track corrected');
       else if (left.some(function (x) { return x.atStation; })) toast('Some bends right beside a station couldn’t be fixed. Try moving that station further from its neighbours, or adding a dot to give the track more room to turn');
       else toast('Some bends couldn’t be smoothed without moving the track a lot. Try dragging the dots further apart');
+    } else if (act === 'hide') {
+      rd.hidden = !rd.hidden;
+      if (rd.hidden && editRide === id) { editRide = null; delMode = false; }
+      changed();
     } else if (act === 'edit') {
+      if (rd.hidden) { rd.hidden = false; save(); }
       editRide = editRide === id ? null : id; delMode = false; render();
     } else if (act === 'delmode') {
       delMode = !delMode; render();
@@ -1617,6 +1631,20 @@
     var sp = rideSpecs[rd.type], minR = minRadius(sp);
     if (!rd.track) return [];
     function badness() { return trackGeo(trackPts(rd), sp).reduce(function (s, g) { return s + (g.tight && !g.gap ? minR - Math.min(g.rmin, minR) + 1 : 0); }, 0); }
+    // dots almost on top of each other make a tiny, too-tight bend: merge them first
+    var mergeD = Math.max(sp.minLen * 0.5, 3), merged = true;
+    while (merged && rd.track && rd.track.length > 3) {
+      merged = false;
+      var Pm = trackPts(rd), nm = Pm.length;
+      for (var mi = 0; mi < nm; mi++) {
+        var a0 = Pm[mi], b0 = Pm[(mi + 1) % nm];
+        if (Math.hypot(a0.x - b0.x, a0.y - b0.y) >= mergeD) continue;
+        var drop = !rd.track[(mi + 1) % nm].s ? (mi + 1) % nm : !rd.track[mi].s ? mi : -1;
+        if (drop < 0) continue;
+        dropPoint(rd, drop); merged = true; break;
+      }
+    }
+    if (!rd.track) return [];
     var start = { bad: badness(), track: JSON.parse(JSON.stringify(rd.track)) };
     if (start.bad > 0) {
       // first: run the track straight through any station with a tight bend beside it
@@ -1930,8 +1958,8 @@
     var wb;
     if (kind === 'lake') { wb = newLake(right + 40, top + 30, 700, null, 0); }
     else {
-      wb = { id: 'wr' + uid(), kind: 'river', x: right + 30, y: top + 50, w: 10, home: null, forNeed: 0, line: [] };
-      for (var i = 0; i < 6; i++) wb.line.push({ x: i * 24, y: [0, 14, 4, -12, -4, 10][i] }); // a gentle S-bend to start
+      // a straight stretch to start; drag the ends to lengthen it, tap it to add bends, and overlap rivers to join them
+      wb = { id: 'wr' + uid(), kind: 'river', x: right + 30, y: top + 40, w: 4, home: null, forNeed: 0, line: [{ x: 0, y: 0 }, { x: 30, y: 0 }, { x: 60, y: 0 }] };
     }
     wb.edited = true;
     Lm.water.push(wb);
@@ -1941,7 +1969,8 @@
   }
   function waterAction(act) {
     var p = plan(), wb = waterSel && findWater(p, waterSel);
-    if (act === 'done' || !wb) { waterSel = null; render(); return; }
+    if (act === 'done' || !wb) { waterSel = null; waterDel = false; render(); return; }
+    if (act === 'delsec') { waterDel = !waterDel; render(); return; }
     if (act === 'delete') {
       var W = p.layout.water, i = W.indexOf(wb), habs = habPolysState(p);
       var before = shortfalls(habs, waterStats(habs, W), true);
@@ -1957,7 +1986,102 @@
       changed(); toast('Water removed');
     }
   }
+  var waterDel = false;
+  // try a change to the water; undo it and say who'd be short if a habitat would run out
+  function tryWaterChange(p, apply, undo) {
+    var habs = habPolysState(p), W = p.layout.water, before = shortfalls(habs, waterStats(habs, W), true);
+    apply();
+    var after = shortfalls(habs, waterStats(habs, W), true), bad = Object.keys(after).filter(function (k) { return after[k] > (before[k] || 0) + 2; })[0];
+    if (!bad) return null;
+    undo();
+    var H = habs.filter(function (x) { return x.seed === bad; })[0];
+    return H ? 'Habitat ' + H.num : 'a habitat';
+  }
+  // which stretch of a river (between dot i and i+1) is nearest a point
+  function riverSeg(wb, at) {
+    var best = null, L = wb.line;
+    for (var i = 0; i < L.length - 1; i++) {
+      var a = { x: wb.x + L[i].x, y: wb.y + L[i].y }, b = { x: wb.x + L[i + 1].x, y: wb.y + L[i + 1].y };
+      var vx = b.x - a.x, vy = b.y - a.y, l2 = vx * vx + vy * vy, u = l2 ? Math.max(0, Math.min(1, ((at.x - a.x) * vx + (at.y - a.y) * vy) / l2)) : 0;
+      var d = Math.hypot(a.x + u * vx - at.x, a.y + u * vy - at.y);
+      if (!best || d < best.d) best = { d: d, i: i };
+    }
+    return best ? best.i : 0;
+  }
+  function tapRiver(wb, at) {
+    var p = plan(), L = wb.line, i = riverSeg(wb, at);
+    if (!waterDel) {
+      // add a bend dot where it was tapped
+      L.splice(i + 1, 0, { x: at.x - wb.x, y: at.y - wb.y });
+      wb.edited = true; changed(); return;
+    }
+    waterDel = false;
+    var W = p.layout.water, saved = JSON.parse(JSON.stringify(wb)), idx = W.indexOf(wb), extra = null;
+    var who = tryWaterChange(p, function () {
+      if (L.length <= 2) { W.splice(idx, 1); return; }
+      if (i === 0) L.shift();
+      else if (i === L.length - 2) L.pop();
+      else {
+        // a stretch from the middle: the river splits in two
+        extra = { id: 'wr' + uid(), kind: 'river', x: wb.x, y: wb.y, w: wb.w, home: null, forNeed: 0, edited: true, line: L.slice(i + 1) };
+        wb.line = L.slice(0, i + 1);
+        W.splice(idx + 1, 0, extra);
+      }
+    }, function () {
+      if (extra) W.splice(W.indexOf(extra), 1);
+      if (W.indexOf(wb) < 0) W.splice(idx, 0, wb);
+      wb.line = saved.line;
+    });
+    if (who) { render(); toast(who + ' needs that stretch of water. Move or add other water there first'); return; }
+    if (W.indexOf(wb) < 0) waterSel = null;
+    wb.edited = true; changed(); toast('Section deleted');
+  }
+  function tapRiverDot(wb, k) {
+    if (wb.kind !== 'river') return;
+    if (wb.line.length <= 2) { toast('A river needs at least 2 dots. Use Delete to remove it'); return; }
+    var saved = wb.line.slice(), who = tryWaterChange(plan(), function () { wb.line.splice(k, 1); }, function () { wb.line = saved; });
+    if (who) { toast(who + ' would be short of water'); return; }
+    wb.edited = true; changed();
+  }
   function hasWaterEdits(p) { return !!(p.layout && p.layout.water && p.layout.water.some(function (w) { return w.edited || !w.home; })); }
+
+  // ---------- handles drawn at screen size ----------
+  // Dots and grips are drawn in screen pixels inside a group that fixHandles() scales,
+  // so they stay the same size on screen however far the map is zoomed.
+  function hpt(x, y, inner) { return '<g class="hs" data-x="' + f1(x) + '" data-y="' + f1(y) + '" transform="translate(' + f1(x) + ' ' + f1(y) + ')">' + inner + '</g>'; }
+  function dotSvg(fill, stroke, r) { return '<circle r="' + (r || 4.5) + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.6"/>'; }
+  // a move grip just outside a shape: P = the shape's outline, avoid = things to keep clear of
+  function gripSvg(kind, id, P, avoid, label) {
+    var cx = 0, cy = 0;
+    P.forEach(function (q) { cx += q.x / P.length; cy += q.y / P.length; });
+    var best = null;
+    for (var k = 0; k < 8; k++) {
+      var a = -Math.PI / 4 + k * Math.PI / 4, dx = Math.cos(a), dy = Math.sin(a), edge = null;
+      P.forEach(function (q) { var pr = (q.x - cx) * dx + (q.y - cy) * dy; if (!edge || pr > edge.pr) edge = { pr: pr, x: q.x, y: q.y }; });
+      var tx = edge.x + dx * 20, ty = edge.y + dy * 20, score = k === 0 ? -1 : 0;
+      avoid.forEach(function (c) { var d = Math.hypot(c.x - tx, c.y - ty) - c.r; if (d < 12) score += 12 - d; });
+      if (!best || score < best.score) best = { score: score, x: edge.x, y: edge.y, dx: dx, dy: dy };
+    }
+    var gx = best.dx * 24, gy = best.dy * 24;
+    return '<g class="drag grip" data-drag="' + kind + '|' + esc(id) + '"><title>' + esc(label) + '</title>' + hpt(best.x, best.y,
+      '<line x1="0" y1="0" x2="' + f1(gx) + '" y2="' + f1(gy) + '" stroke="#22301f" stroke-width="1.4"/>' +
+      '<circle cx="' + f1(gx) + '" cy="' + f1(gy) + '" r="9" fill="#22301f" stroke="#fff" stroke-width="1.5"/>' +
+      '<path transform="translate(' + f1(gx) + ' ' + f1(gy) + ')" d="M0 -6L-2.2 -3.4H2.2ZM0 6L-2.2 3.4H2.2ZM-6 0L-3.4 -2.2V2.2ZM6 0L3.4 -2.2V2.2ZM-0.7 -3.6H0.7V3.6H-0.7ZM-3.6 -0.7H3.6V0.7H-3.6Z" fill="#fff"/>') + '</g>';
+  }
+  // size the handles and the scale bar for the current zoom
+  function fixHandles(svg) {
+    var m = svg && svg.getScreenCTM && svg.getScreenCTM();
+    if (!m || !m.a) return;
+    var u = 1 / m.a;
+    svg.querySelectorAll('.hs').forEach(function (g) { g.setAttribute('transform', 'translate(' + g.getAttribute('data-x') + ' ' + g.getAttribute('data-y') + ') scale(' + u.toFixed(4) + ')'); });
+    var bar = svg.querySelector('#zbar'), vb = svg.viewBox.baseVal;
+    if (bar && vb) {
+      var want = 90 * u, len = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500].filter(function (v) { return v <= want; }).pop() || 1;
+      var x = vb.x + 12 * u, y = vb.y + vb.height - 12 * u;
+      bar.innerHTML = '<rect x="' + x.toFixed(2) + '" y="' + (y - 1.5 * u).toFixed(2) + '" width="' + len + '" height="' + (3 * u).toFixed(2) + '" fill="#22301f"/>' +
+        '<text x="' + (x + len + 5 * u).toFixed(2) + '" y="' + y.toFixed(2) + '" font-size="' + (11 * u).toFixed(2) + '" fill="#22301f" dominant-baseline="central">' + len + ' m</text>';
+    }
+  }
 
   // ---------- drawing ----------
   function f1(n) { return Math.round(n * 10) / 10; }
@@ -2025,7 +2149,7 @@
     var pad = 10, vb = [bb.x - pad, bb.y - pad, bb.w + 2 * pad, bb.h + 2 * pad + 20];
     var colorOf = {};
     themeNames.forEach(function (t, i) { colorOf[t] = THEME_COLORS[i % THEME_COLORS.length]; });
-    var svg = '<svg class="zoo-map" viewBox="' + vb.map(f1).join(' ') + '" role="img" aria-label="Layout concept for ' + esc(p.name) + '" xmlns="http://www.w3.org/2000/svg">';
+    var svg = '<svg class="zoo-map" data-vb="' + vb.map(f1).join(' ') + '" viewBox="' + vb.map(f1).join(' ') + '" role="img" aria-label="Layout concept for ' + esc(p.name) + '" xmlns="http://www.w3.org/2000/svg">';
     svg += '<rect x="' + f1(vb[0]) + '" y="' + f1(vb[1]) + '" width="' + f1(vb[2]) + '" height="' + f1(vb[3]) + '" fill="#f7f3ea"/>';
     if (wPolys.length) svg += '<defs><clipPath id="zoo-water">' + wPolys.map(function (o) { return '<path d="' + polyD(o.P) + '"/>'; }).join('') + '</clipPath></defs>';
     var labelSvg = '';
@@ -2042,7 +2166,7 @@
     var lines = chains(R.net, R.kept);
     R.ents.forEach(function (e) { if (e.link) lines.push([[e.cx, e.cy], [e.link.x, e.link.y]]); });
     // every ride station gets a short path to the nearest path
-    R.circles.forEach(function (c) { if (c.type !== 'station') return; var nd = nearestPathNode(R, c.x, c.y); if (nd) lines.push([[c.x, c.y], [nd.x, nd.y]]); });
+    R.circles.forEach(function (c) { if (c.type !== 'station' || c.ride.hidden) return; var nd = nearestPathNode(R, c.x, c.y); if (nd) lines.push([[c.x, c.y], [nd.x, nd.y]]); });
     lines.forEach(function (l) {
       var d = free ? smoothPath(l, false) : 'M' + l.map(function (q) { return f1(q[0]) + ' ' + f1(q[1]); }).join('L');
       svg += '<path d="' + d + '" fill="none" stroke="#d9c79e" stroke-width="' + S.P + '" stroke-linecap="round" stroke-linejoin="round"/>';
@@ -2081,7 +2205,8 @@
       var open = r.total - Object.keys(r.by).reduce(function (a, k) { return a + r.by[k]; }, 0);
       if (open > 4) where.push(fmt(open) + ' m² open water');
       svg += '<g class="drag water" data-drag="w|' + esc(o.wb.id) + '"><title>' + (o.wb.kind === 'river' ? 'River' : 'Lake') + ' · ' + fmt(waterArea(o.wb)) + ' m²' + (where.length ? ': ' + where.join(', ') : '') + ' (drag to move, tap to reshape)</title>' +
-        '<path data-water="' + esc(o.wb.id) + '" d="' + polyD(o.P) + '" fill="' + WATER_FILL + '"/></g>';
+        '<path data-water="' + esc(o.wb.id) + '" d="' + polyD(o.P) + '" fill="' + WATER_FILL + '"/>' +
+        (o.wb.kind !== 'river' && waterArea(o.wb) < 400 ? hpt(o.wb.x, o.wb.y, '<circle r="8" fill="transparent"/>') : '') + '</g>';
     });
     if (wPolys.length) {
       // habitat edges across water (where the barrier would go), and paths over water as bridges
@@ -2099,11 +2224,14 @@
     // ride tracks go over everything (gondolas and monorails run overhead)
     tracks.forEach(function (t) {
       var col = t.rd.color, editing = editRide === t.rd.id;
+      if (t.rd.hidden) return;
       t.segs.forEach(function (g) {
         if (g.gap) return;
         svg += '<path d="' + g.d + '" fill="none" stroke="' + (g.tight ? TIGHT_COLOR : col) + '" stroke-width="' + f1(t.sp.track + (editing ? 1 : 0)) + '" stroke-linecap="round"/>' +
           '<path d="' + g.d + '" fill="none" stroke="#fff" stroke-opacity="0.85" stroke-width="0.7" stroke-dasharray="3 3"/>';
       });
+      // a red ring round each tight bend, so even a tiny one shows
+      t.segs.forEach(function (g) { if (!g.gap && g.tight) svg += hpt(g.at.x, g.at.y, '<circle r="10" fill="none" stroke="' + TIGHT_COLOR + '" stroke-width="2.2" pointer-events="none"/>'); });
       // wide invisible strokes, so the track is easy to tap
       t.segs.forEach(function (g) {
         if (g.gap) return;
@@ -2111,7 +2239,7 @@
       });
     });
     R.circles.forEach(function (c) {
-      if (c.type !== 'station') return;
+      if (c.type !== 'station' || c.ride.hidden) return;
       var rd = c.ride, t = tracks.filter(function (x) { return x.rd === rd; })[0], ang = t && t.ang[c.seed] !== undefined ? t.ang[c.seed] : 0;
       svg += '<g class="drag" data-drag="c|' + esc(c.seed) + '"><title>' + esc(rd.name) + ' station (drag to move, tap to remove)</title>' +
         '<rect x="' + f1(c.x - c.w / 2) + '" y="' + f1(c.y - c.d / 2) + '" width="' + f1(c.w) + '" height="' + f1(c.d) + '" rx="1.5" fill="' + rd.color + '" stroke="#fff" stroke-width="0.9" transform="rotate(' + f1(ang) + ' ' + f1(c.x) + ' ' + f1(c.y) + ')"/>' +
@@ -2119,13 +2247,13 @@
     });
     // bend points of the track being edited
     tracks.forEach(function (t) {
-      if (editRide !== t.rd.id) return;
+      if (editRide !== t.rd.id || t.rd.hidden) return;
       var n = t.P.length;
       t.P.forEach(function (q, i) {
         if (q.s) return;
         var loose = q.g || t.P[(i - 1 + n) % n].g;
         svg += '<g class="drag bend" data-drag="b|' + esc(t.rd.id) + '|' + i + '"><title>' + (loose ? 'Loose end (drag to move, tap to join the gap)' : 'Bend point (drag to move, tap to remove)') + '</title>' +
-          '<circle cx="' + f1(q.x) + '" cy="' + f1(q.y) + '" r="' + (loose ? 4.6 : 3.2) + '" fill="' + (loose ? t.rd.color : '#fff') + '" stroke="' + (loose ? '#fff' : t.rd.color) + '" stroke-width="1.4"/></g>';
+          hpt(q.x, q.y, dotSvg(loose ? t.rd.color : '#fff', loose ? '#fff' : t.rd.color, loose ? 6 : 4.5)) + '</g>';
       });
     });
     // stretch points of the lake or river being reshaped
@@ -2136,7 +2264,7 @@
       var wl = wsel.kind === 'river' ? wsel.line : wsel.pts;
       waterPtsSvg += '<path d="' + polyD(waterPoly(wsel)) + '" fill="none" stroke="#1d4d6b" stroke-width="0.9" stroke-dasharray="2.5 2" pointer-events="none"/>';
       wl.forEach(function (q, k) {
-        waterPtsSvg += '<g class="drag shape-pt" data-drag="wp|' + esc(wsel.id) + '|' + k + '"><title>Stretch point (drag to change the shape)</title><circle cx="' + f1(wsel.x + q.x) + '" cy="' + f1(wsel.y + q.y) + '" r="3.6" fill="#fff" stroke="#1d4d6b" stroke-width="1.3"/></g>';
+        waterPtsSvg += '<g class="drag shape-pt" data-drag="wp|' + esc(wsel.id) + '|' + k + '"><title>' + (wsel.kind === 'river' ? 'Bend point (drag to bend or lengthen, tap to remove)' : 'Stretch point (drag to change the shape)') + '</title>' + hpt(wsel.x + q.x, wsel.y + q.y, dotSvg('#fff', '#1d4d6b')) + '</g>';
       });
     }
     // stretch points of the habitat being reshaped
@@ -2149,7 +2277,7 @@
       shapeEdit = { seed: sc.seed, cx: sc.x, cy: sc.y, pts: spts, min: sc.unit.base };
       shapeSvg += '<path d="' + outlineD(sc.x, sc.y, spts, 0) + '" fill="none" stroke="#1f2b1c" stroke-width="0.9" stroke-dasharray="2.5 2" pointer-events="none"/>';
       spts.forEach(function (q, k) {
-        shapeSvg += '<g class="drag shape-pt" data-drag="s|' + esc(sc.seed) + '|' + k + '"><title>Stretch point (drag to change the shape)</title><circle cx="' + f1(sc.x + q.x) + '" cy="' + f1(sc.y + q.y) + '" r="3.6" fill="#fff" stroke="#1f2b1c" stroke-width="1.3"/></g>';
+        shapeSvg += '<g class="drag shape-pt" data-drag="s|' + esc(sc.seed) + '|' + k + '"><title>Stretch point (drag to change the shape)</title>' + hpt(sc.x + q.x, sc.y + q.y, dotSvg('#fff', '#1f2b1c')) + '</g>';
       });
     }
     // theme names, placed where they don't cover staff areas, plazas, entrances or other names
@@ -2186,20 +2314,26 @@
       svg += '<g class="drag" data-drag="e|' + i + '"><title>Entrance ' + (i + 1) + ' (drag to move)</title><rect x="' + f1(e.x) + '" y="' + f1(e.y) + '" width="' + f1(e.w) + '" height="' + f1(e.d) + '" rx="4" fill="#3d6a47"/>' +
         '<text x="' + f1(e.cx) + '" y="' + f1(e.cy) + '" font-size="6.5" fill="#fff" text-anchor="middle" dominant-baseline="central">Entrance</text></g>';
     });
+    var gripAvoid = R.circles.filter(function (c) { return c.type !== 'part'; }).map(function (c) { return { x: c.x, y: c.y, r: c.r }; });
+    if (wsel) waterPtsSvg += gripSvg('wg', wsel.id, waterPoly(wsel), gripAvoid, 'Drag to move this ' + (wsel.kind === 'river' ? 'river' : 'lake'));
+    if (sc) shapeSvg += gripSvg('hg', sc.seed, outlineSamples(spts, 4).map(function (q) { return { x: sc.x + q.x, y: sc.y + q.y }; }), gripAvoid.filter(function (c) { return Math.hypot(c.x - sc.x, c.y - sc.y) > 1; }), 'Drag to move this habitat');
     svg += shapeSvg + waterPtsSvg;
     var sx = vb[0] + pad, sy = vb[1] + vb[3] - 9;
-    svg += '<rect x="' + f1(sx) + '" y="' + f1(sy - 1.5) + '" width="50" height="3" fill="#22301f"/><text x="' + f1(sx + 55) + '" y="' + f1(sy) + '" font-size="7" fill="#22301f" dominant-baseline="central">50 m</text>';
+    svg += '<g id="zbar" pointer-events="none"><rect x="' + f1(sx) + '" y="' + f1(sy - 1.5) + '" width="50" height="3" fill="#22301f"/><text x="' + f1(sx + 55) + '" y="' + f1(sy) + '" font-size="7" fill="#22301f" dominant-baseline="central">50 m</text></g>';
     svg += '</svg>';
 
     var area = bb.w * bb.h, mapA = S.map * S.map;
     var html = '<section class="card map-card"><div class="map-head"><h2>Layout concept</h2><span class="sub">about ' + fmt(bb.w) + ' × ' + fmt(bb.h) + ' m · ' + (Math.round(area / mapA * 1000) / 10) + '% of the map</span><span class="map-tools"><button type="button" class="secondary icon" id="undo" title="Undo" aria-label="Undo"' + (undoStack.length ? '' : ' disabled') + '>&#8630;</button><button type="button" class="secondary icon" id="redo" title="Redo" aria-label="Redo"' + (redoStack.length ? '' : ' disabled') + '>&#8631;</button><button type="button" class="secondary" id="regen">Regenerate plan</button></span></div>';
-    html += '<div class="map-wrap">' + svg + '</div>';
+    html += '<div class="map-wrap">' + svg + '<div class="zoom-ctl" role="group" aria-label="Zoom"><button type="button" data-zoom="in" title="Zoom in" aria-label="Zoom in">+</button><button type="button" data-zoom="out" title="Zoom out" aria-label="Zoom out">−</button><button type="button" data-zoom="fit" title="Show the whole zoo" aria-label="Show the whole zoo">⤢</button></div></div>';
     if (wsel) {
       var wr = wst.body[wsel.id] || { total: 0, by: {} }, parts2 = Object.keys(wr.by).map(function (sd) { var hx = habPolys.filter(function (x) { return x.seed === sd; })[0]; return hx ? fmt(wr.by[sd]) + ' m² in Habitat ' + hx.num : ''; }).filter(Boolean);
       var open2 = wr.total - Object.keys(wr.by).reduce(function (a, k) { return a + wr.by[k]; }, 0);
       if (open2 > 4) parts2.push(fmt(open2) + ' m² open water');
-      html += '<div class="shape-bar water-bar"><span><b>' + (wsel.kind === 'river' ? 'River' : 'Lake') + ' · ' + fmt(waterArea(wsel)) + ' m²</b>' + (parts2.length ? ' <span class="muted">(' + parts2.join(', ') + ')</span>' : '') + '. Drag it to move it, or drag the white dots to reshape it.</span>' +
-        '<span class="ride-btns"><button type="button" class="secondary small danger" data-water-act="delete">Delete</button><button type="button" class="secondary small" data-water-act="done">Done</button></span></div>';
+      var isRiver = wsel.kind === 'river';
+      html += '<div class="shape-bar water-bar"><span><b>' + (isRiver ? 'River' : 'Lake') + ' · ' + fmt(waterArea(wsel)) + ' m²</b>' + (parts2.length ? ' <span class="muted">(' + parts2.join(', ') + ')</span>' : '') + '. ' +
+        (isRiver ? (waterDel ? '<strong>Tap the stretch of river to delete.</strong>' : 'Drag the grip to move it and the dots to bend or lengthen it. Tap the river to add a dot; tap a dot to remove it.') : 'Drag the grip to move it, or the white dots to reshape it.') + '</span>' +
+        '<span class="ride-btns">' + (isRiver ? '<button type="button" class="secondary small' + (waterDel ? ' on' : '') + '" data-water-act="delsec">' + (waterDel ? 'Cancel delete' : 'Delete a section') + '</button>' : '') +
+        '<button type="button" class="secondary small danger" data-water-act="delete">Delete</button><button type="button" class="secondary small" data-water-act="done">Done</button></span></div>';
     }
     if (sc) {
       var su = sc.unit;
@@ -2212,8 +2346,8 @@
       '<span class="lg"><i style="background:#3d6a47"></i>Entrance</span><span class="lg"><i style="background:#d9c79e"></i>Path</span>';
     var nPl = R.plazas.length, nSt = R.circles.filter(function (c) { return c.type === 'staff'; }).length;
     if (W.length) legend += '<span class="lg"><i style="background:' + WATER_FILL + ';border-color:' + WATER_EDGE + '"></i>Water</span>';
-    ridesOf(p).forEach(function (rd) { legend += '<span class="lg"><i style="background:' + rd.color + '"></i>' + esc(rd.name) + '</span>'; });
-    if (tracks.some(function (t) { return t.segs.some(function (g) { return g.tight && !g.gap; }); })) legend += '<span class="lg"><i style="background:' + TIGHT_COLOR + '"></i>Bend too tight</span>';
+    ridesOf(p).forEach(function (rd) { legend += '<span class="lg"' + (rd.hidden ? ' style="opacity:.5"' : '') + '><i style="background:' + rd.color + '"></i>' + esc(rd.name) + (rd.hidden ? ' (hidden)' : '') + '</span>'; });
+    if (tracks.some(function (t) { return !t.rd.hidden && t.segs.some(function (g) { return g.tight && !g.gap; }); })) legend += '<span class="lg"><i style="background:' + TIGHT_COLOR + '"></i>Bend too tight</span>';
     html += '<div class="legend">' + legend + '</div>';
     html += ridesHtml(p);
     // key: what's in each numbered enclosure, by theme
@@ -2278,12 +2412,75 @@
     setupDrag();
   }
 
+  // ---------- zooming and moving round the map ----------
+  var view = { k: 1, cx: null, cy: null, plan: null };
+  function baseVB(svg) { var a = (svg.getAttribute('data-vb') || '0 0 1 1').split(' ').map(Number); return { x: a[0], y: a[1], w: a[2], h: a[3] }; }
+  function applyView(svg) {
+    if (!svg) return;
+    var b = baseVB(svg);
+    if (view.plan !== state.current) { view = { k: 1, cx: null, cy: null, plan: state.current }; }
+    var k = view.k, w = b.w / k, h = b.h / k;
+    if (view.cx === null || k <= 1.0001) { view.cx = b.x + b.w / 2; view.cy = b.y + b.h / 2; }
+    // keep the view on the zoo
+    view.cx = Math.max(b.x + w / 2, Math.min(b.x + b.w - w / 2, view.cx));
+    view.cy = Math.max(b.y + h / 2, Math.min(b.y + b.h - h / 2, view.cy));
+    svg.setAttribute('viewBox', [view.cx - w / 2, view.cy - h / 2, w, h].map(function (v) { return v.toFixed(2); }).join(' '));
+    fixHandles(svg);
+  }
+  // zoom by a factor, keeping the map point (px, py) where it is on screen
+  function zoomAt(svg, factor, px, py) {
+    var b = baseVB(svg), k0 = view.k, k1 = Math.max(1, Math.min(12, k0 * factor));
+    if (k1 === k0) return;
+    var w0 = b.w / k0, h0 = b.h / k0, w1 = b.w / k1, h1 = b.h / k1;
+    var vx0 = view.cx - w0 / 2, vy0 = view.cy - h0 / 2;
+    if (px === undefined) { px = view.cx; py = view.cy; }
+    var rx = (px - vx0) / w0, ry = (py - vy0) / h0;
+    view.k = k1; view.cx = px - rx * w1 + w1 / 2; view.cy = py - ry * h1 + h1 / 2;
+    applyView(svg);
+  }
+  function zoomButton(which) {
+    var svg = document.querySelector('#panel .zoo-map');
+    if (!svg) return;
+    if (which === 'fit') { view.k = 1; applyView(svg); return; }
+    zoomAt(svg, which === 'in' ? 1.5 : 1 / 1.5);
+  }
+
   // ---------- dragging things on the map ----------
   function setupDrag() {
     var svg = document.querySelector('#panel .zoo-map');
     if (!svg) return;
-    var drag = null;
+    var drag = null, touches = {}, pinch = null, pan = null;
     function pt(e) { var q = svg.createSVGPoint(); q.x = e.clientX; q.y = e.clientY; return q.matrixTransform(svg.getScreenCTM().inverse()); }
+    applyView(svg);
+    svg.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      var q = pt(e);
+      zoomAt(svg, Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0016)), q.x, q.y);
+    }, { passive: false });
+    // two fingers: pinch to zoom
+    svg.addEventListener('pointerdown', function (e) {
+      touches[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var ids = Object.keys(touches);
+      if (ids.length === 2) {
+        // a second finger means zoom: drop anything the first finger had picked up
+        if (drag) { drag.g.removeAttribute('transform'); drag.g.classList.remove('dragging'); svg.querySelectorAll('[data-drag][transform]').forEach(function (el) { if (!el.classList.contains('hs')) el.removeAttribute('transform'); }); drag = null; }
+        var a = touches[ids[0]], b = touches[ids[1]];
+        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1 }; tap = null; pan = null;
+      }
+    }, true);
+    svg.addEventListener('pointermove', function (e) {
+      if (!touches[e.pointerId]) return;
+      touches[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var ids = Object.keys(touches);
+      if (pinch && ids.length === 2) {
+        var a = touches[ids[0]], b = touches[ids[1]], d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        var mid = pt({ clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 });
+        zoomAt(svg, d / pinch.d, mid.x, mid.y); pinch.d = d;
+      }
+    }, true);
+    function lift(e) { delete touches[e.pointerId]; if (Object.keys(touches).length < 2) pinch = null; }
+    svg.addEventListener('pointerup', lift, true);
+    svg.addEventListener('pointercancel', lift, true);
     var tap = null;
     svg.addEventListener('pointerdown', function (e) {
       var g = e.target.closest('.drag');
@@ -2291,9 +2488,10 @@
         // not something to drag: remember it in case it's a tap on a ride track or the open map
         var trk = e.target.closest('.trk');
         tap = { x: e.clientX, y: e.clientY, id: e.pointerId, trk: trk ? trk.getAttribute('data-trk') : null };
+        if (!pinch) { pan = { id: e.pointerId, x: e.clientX, y: e.clientY, cx: view.cx, cy: view.cy, u: 1 / (svg.getScreenCTM().a || 1), moved: false }; try { svg.setPointerCapture(e.pointerId); } catch (err) {} }
         return;
       }
-      if (!g || drag) return;
+      if (!g || drag || pinch) return;
       e.preventDefault();
       try { g.setPointerCapture(e.pointerId); } catch (err) {}
       var q = pt(e);
@@ -2302,11 +2500,23 @@
       g.parentNode.appendChild(g); // draw it on top while moving
     });
     svg.addEventListener('pointermove', function (e) {
+      if (pan && e.pointerId === pan.id && !pinch) {
+        var mx = e.clientX - pan.x, my = e.clientY - pan.y;
+        if (!pan.moved && Math.hypot(mx, my) < 4) return;
+        pan.moved = true; svg.classList.add('panning');
+        view.cx = pan.cx - mx * pan.u; view.cy = pan.cy - my * pan.u;
+        applyView(svg);
+        return;
+      }
       if (!drag || e.pointerId !== drag.id) return;
       var q = pt(e);
       drag.dx = q.x - drag.x0; drag.dy = q.y - drag.y0;
       drag.g.setAttribute('transform', 'translate(' + drag.dx.toFixed(1) + ' ' + drag.dy.toFixed(1) + ')');
       var dp = drag.g.getAttribute('data-drag').split('|');
+      if (dp[0] === 'wg' || dp[0] === 'hg') {
+        var tgt = svg.querySelector('[data-drag="' + (dp[0] === 'wg' ? 'w|' : 'c|') + dp[1] + '"]');
+        if (tgt) tgt.setAttribute('transform', 'translate(' + drag.dx.toFixed(1) + ' ' + drag.dy.toFixed(1) + ')');
+      }
       if (dp[0] === 'wp' && waterEdit && waterEdit.wb.id === dp[1]) {
         var wb2 = JSON.parse(JSON.stringify(waterEdit.wb)), arr2 = wb2.kind === 'river' ? wb2.line : wb2.pts, kk = Number(dp[2]);
         arr2[kk] = { x: arr2[kk].x + drag.dx, y: arr2[kk].y + drag.dy };
@@ -2322,8 +2532,10 @@
       }
     });
     function end(e) {
+      if (pan && e.pointerId === pan.id) { var wasPan = pan.moved; pan = null; svg.classList.remove('panning'); if (wasPan) { tap = null; return; } }
       if (tap && e.pointerId === tap.id) {
         var tp = tap; tap = null;
+        if (pinch) return;
         if (Math.hypot(e.clientX - tp.x, e.clientY - tp.y) >= 4) return;
         var at = pt(e);
         if (tp.trk) { var tk = tp.trk.split('|'); tapTrack(tk[0], Number(tk[1]), at); }
@@ -2343,7 +2555,8 @@
   }
   function moveItem(parts, dx, dy) {
     if (parts[0] === 's') { stretchPoint(parts[1], Number(parts[2]), dx, dy); return; }
-    if (parts[0] === 'w') { moveWater(parts[1], dx, dy); return; }
+    if (parts[0] === 'w' || parts[0] === 'wg') { moveWater(parts[1], dx, dy); return; }
+    if (parts[0] === 'hg') parts = ['c', parts[1]];
     if (parts[0] === 'wp') { stretchWater(parts[1], Number(parts[2]), dx, dy); return; }
     var Lm = toManual(plan()), kind = parts[0], id = parts[1], LR = layoutCache.result;
     // water entirely inside a habitat moves with it; shared water stays where it is
@@ -2409,11 +2622,17 @@
     }
   }
   function tapItem(parts, at) {
+    if (parts[0] === 'wg' || parts[0] === 'hg') return; // grips only move things
     var kind = parts[0], id = parts[1], LR = layoutCache.result;
     var isStaff = kind === 'c' && LR && LR.R.circles.some(function (c) { return c.seed === id && c.type === 'staff'; });
     var stn = kind === 'c' && findStation(plan(), id);
     if (kind === 'b') { tapBend(id, Number(parts[2])); return; }
-    if (kind === 'w') { waterSel = waterSel === id ? null : id; shapeSel = null; editRide = null; delMode = false; render(); return; }
+    if (kind === 'w') {
+      var twb = findWater(plan(), id);
+      if (twb && waterSel === id && twb.kind === 'river' && at) { tapRiver(twb, at); return; }
+      waterSel = waterSel === id ? null : id; waterDel = false; shapeSel = null; editRide = null; delMode = false; render(); return;
+    }
+    if (kind === 'wp') { var dwb = findWater(plan(), id); if (dwb) tapRiverDot(dwb, Number(parts[2])); return; }
     var hab = kind === 'c' && LR && LR.R.circles.filter(function (c) { return c.seed === id && (c.type === 'habitat' || c.type === 'aquarium'); })[0];
     // while redrawing a gap in a ride's track, taps on habitats place track (gondolas and monorails pass overhead)
     var er = editRide && findRide(plan(), editRide);
@@ -2646,6 +2865,8 @@
       if (e.target.closest('#redo')) return undoRedo(false);
       var rb = e.target.closest('button[data-ride-act]');
       if (rb) return rideAction(rb.getAttribute('data-ride-act'), rb.getAttribute('data-ride'));
+      var zb = e.target.closest('button[data-zoom]');
+      if (zb) return zoomButton(zb.getAttribute('data-zoom'));
       var wbt = e.target.closest('button[data-water-act]');
       if (wbt) return waterAction(wbt.getAttribute('data-water-act'));
       var sb = e.target.closest('button[data-shape-act]');
@@ -2812,7 +3033,7 @@
     });
     if (p.layout && p.layout.water) p.layout.water = (Array.isArray(p.layout.water) ? p.layout.water : []).filter(function (w) {
       if (!w || !isFinite(w.x) || !isFinite(w.y)) return false;
-      if (w.kind === 'river') return Array.isArray(w.line) && w.line.length >= 2 && w.w > 0;
+      if (w.kind === 'river') { if (w.w > 4) w.w = 4; return Array.isArray(w.line) && w.line.length >= 2 && w.w > 0; }
       return Array.isArray(w.pts) && w.pts.length >= 5;
     });
     // rides only exist on a hand-arranged map; drop anything broken
@@ -2859,6 +3080,7 @@
     render();
     lastSnap = JSON.stringify(state);
     undoButtons();
+    window.addEventListener('resize', function () { fixHandles(document.querySelector('#panel .zoo-map')); });
     document.addEventListener('keydown', function (e) {
       if (!(e.ctrlKey || e.metaKey) || /input|select|textarea/i.test((e.target || {}).tagName || '')) return;
       var k = e.key.toLowerCase();

@@ -565,10 +565,22 @@
       byTheme[t].push({ type: 'exhibits', A: side * side, bw: side * 1.3, bd: side / 1.3, theme: t, seed: 'x' + t, count: list.length,
         label: 'Exhibits', short: 'E', title: 'Exhibits: ' + list.map(function (u) { return nameOf(u.e.key); }).join(', ') });
     });
-    Object.keys(byTheme).forEach(function (t) { byTheme[t].forEach(function (it) { it.r = it.bw ? Math.hypot(it.bw, it.bd) / 2 : Math.sqrt(it.A / Math.PI); }); });
+    Object.keys(byTheme).forEach(function (t) { byTheme[t].forEach(function (it) { it.r = itemR(it); }); });
     return byTheme;
   }
 
+  // How far an item reaches from its centre. Habitats are drawn as soft wobbly shapes, so they
+  // reach to the furthest point of that shape (r0 is the plain circle of the same area).
+  function itemR(it) {
+    if (it.bw) return Math.hypot(it.bw, it.bd) / 2;
+    var r0 = Math.sqrt(it.A / Math.PI);
+    it.r0 = r0;
+    if (it.type !== 'habitat' && it.type !== 'aquarium') return r0;
+    return blobMaxR(it.seed, r0);
+  }
+  function blobMaxR(seed, r0) {
+    return Math.max.apply(null, outlineSamples(defaultShape(seed, r0), 6).map(function (q) { return Math.hypot(q.x, q.y); })) * 1.01;
+  }
   // Pack each theme into a cluster, then pack the clusters together.
   function packAll(byTheme, themeNames, S, more, variant) {
     var gap = (S.P + 4) / 2, all = [], clusters = [], vr = rand(seedOf('v' + (variant || 0)));
@@ -584,7 +596,7 @@
         var at = seq.map(function (it) { return it.seed; }).indexOf(after);
         seq.splice(at >= 0 ? at + 1 : Math.min(seq.length, 2), 0, { type: 'staff', A: S.staffW * S.staffD, theme: t, seed: 's' + t + s, label: 'Staff', short: 'S', title: 'Staff area (keeper huts and other staff buildings)' });
       });
-      var circles = seq.map(function (it) { it.r = it.bw ? Math.hypot(it.bw, it.bd) / 2 : Math.sqrt(it.A / Math.PI); it.theme = t; return { r: it.r + gap, it: it }; });
+      var circles = seq.map(function (it) { it.r = itemR(it); it.theme = t; return { r: it.r + gap, it: it }; });
       d3.packSiblings(circles);
       var enc = d3.packEnclose(circles);
       clusters.push({ theme: t, ti: ti, circles: circles, r: enc.r + 4, cx: enc.x, cy: enc.y });
@@ -665,8 +677,10 @@
       var i = T[e], j = T[e % 3 === 2 ? e - 2 : e + 1], ci = circles[i], cj = circles[j];
       if (ci.ghost && cj.ghost) continue;
       if ((ci.owner || cj.owner) && own(i) === own(j)) continue; // never through the middle of a stretched habitat
+      if ((ci.type === 'station' || cj.type === 'station') && !ci.ghost && !cj.ghost && Math.hypot(ci.x - cj.x, ci.y - cj.y) - ci.r - cj.r < S.P * 1.2) continue; // no squeezing a path past a ride station
       // the path must squeeze between the two enclosures, not through them
       if (segDist(n1.x, n1.y, n2.x, n2.y, ci.x, ci.y) < ci.r * 0.9 || segDist(n1.x, n1.y, n2.x, n2.y, cj.x, cj.y) < cj.r * 0.9) continue;
+      if (circles.some(function (o) { return !o.ghost && o !== ci && o !== cj && segDist(n1.x, n1.y, n2.x, n2.y, o.x, o.y) < o.r * 0.9; })) continue; // nor through any other enclosure on the way
       // a path only counts as passing an enclosure if it actually runs close beside it
       var near = function (k) { var c = circles[k]; return !c.ghost && segDist(n1.x, n1.y, n2.x, n2.y, c.x, c.y) - c.r <= 14; };
       edges.push({ a: t1, b: t2, len: Math.hypot(n1.x - n2.x, n1.y - n2.y), fronts: uniq([i, j].filter(near).map(own)) });
@@ -866,7 +880,8 @@
   // (Used for the automatic layout and after the player moves things.)
   function finish(circles, clusters, S, nEnt, givenEnts) {
     var style = 'theme-loops';
-    var net = gapNetwork(circles, S), kept = choosePaths(net, circles, clusters, style);
+    var ncs = circles.filter(function (c) { return !c.inHab; });
+    var net = gapNetwork(ncs, S), kept = choosePaths(net, ncs, clusters, style);
     var keptIdx = Object.keys(kept).map(Number), problems = [];
     var keptNet = { nodes: net.nodes, edges: keptIdx.map(function (ei) { return net.edges[ei]; }) };
     keptNet.adj = net.nodes.map(function () { return []; });
@@ -1090,7 +1105,17 @@
     ridesOf(p).forEach(function (rd) {
       var sp = rideSpecs[rd.type];
       rd.stations.forEach(function (st) {
-        circles.push({ type: 'station', x: st.x, y: st.y, r: Math.sqrt(sp.w * sp.d / Math.PI), A: sp.w * sp.d, theme: null, cluster: -1, seed: st.id, ride: rd, w: sp.w, d: sp.d, title: rd.name + ' station' });
+        circles.push({ type: 'station', x: st.x, y: st.y, r: Math.hypot(sp.w, sp.d) / 2, A: sp.w * sp.d, theme: null, cluster: -1, seed: st.id, ride: rd, w: sp.w, d: sp.d, title: rd.name + ' station' });
+      });
+    });
+    // stations sitting inside a habitat (gondola, monorail and riverboat stations may) are reached
+    // by their own walkway, so the paths don't need to go round them
+    circles.forEach(function (c) {
+      if (c.type !== 'station') return;
+      c.inHab = circles.some(function (h) {
+        if ((h.type !== 'habitat' && h.type !== 'aquarium') || h.pending) return false;
+        var q = Lm.pos[h.seed], pts = q && q.shape ? scaleShape(q.shape, h.A) : defaultShape(h.seed, Math.sqrt(h.A / Math.PI));
+        return inPoly(outlineSamples(pts, 4).map(function (o) { return { x: h.x + o.x, y: h.y + o.y }; }), c.x, c.y);
       });
     });
     // stretched habitats: fit the outline to the habitat's size and fill it with round pieces,
@@ -1376,13 +1401,25 @@
     });
     return out;
   }
-  // keep a station off habitats, exhibits and staff areas
-  function clearStation(st, sp, circles) {
-    var sr = Math.sqrt(sp.w * sp.d / Math.PI);
+  // Stations of these rides may sit inside a habitat (a 4x4 or train station may not).
+  var IN_HAB_OK = { gondola: 1, monorail: 1, boat: 1 };
+  function onWaterAt(LR, x, y) {
+    return ((LR && LR.water) || []).some(function (wb) { var P = waterPoly(wb), b = bboxOf(P); return x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1 && inPoly(P, x, y); });
+  }
+  // Keep a station off exhibits and aquariums always; off habitats unless its ride may sit in one;
+  // and off staff areas unless it's on water. A station dropped on water otherwise stays put.
+  function clearStation(st, sp, circles, type, LR) {
+    var sr = Math.hypot(sp.w, sp.d) / 2 * 0.9, wet = onWaterAt(LR, st.x, st.y), inOk = !!IN_HAB_OK[type];
+    var avoid = function (c) {
+      if (c.type === 'exhibits' || c.type === 'walk' || c.type === 'aquarium') return true;
+      if (c.type === 'habitat' || c.type === 'part') return !inOk;
+      if (c.type === 'staff') return !wet;
+      return false;
+    };
     for (var it = 0; it < 30; it++) {
       var moved = false;
       circles.forEach(function (c) {
-        if (c.type === 'station' || c.seed === st.id) return;
+        if (c.type === 'station' || c.seed === st.id || !avoid(c)) return;
         var dx = st.x - c.x, dy = st.y - c.y, d = Math.hypot(dx, dy) || 0.01, need = c.r + sr + 3;
         if (d >= need) return;
         st.x += dx / d * (need - d + 0.5); st.y += dy / d * (need - d + 0.5); moved = true;
@@ -1396,12 +1433,13 @@
     return w ? { x: cx / w, y: cy / w } : { x: 0, y: 0 };
   }
   // the nearest path a station can join without cutting through an enclosure
-  function nearestPathNode(R, x, y) {
+  function nearestPathNode(R, x, y, walkway) {
     var nearest = null;
     R.keptNodes.forEach(function (n) {
       var nd = R.net.nodes[n], d = Math.hypot(nd.x - x, nd.y - y);
       var blocked = R.circles.some(function (c) {
         if (c.type === 'station' && Math.hypot(c.x - x, c.y - y) < 1) return false;
+        if (walkway && (c.type === 'habitat' || c.type === 'part')) return false;
         var vx = nd.x - x, vy = nd.y - y, l2 = vx * vx + vy * vy, u = l2 ? Math.max(0, Math.min(1, ((c.x - x) * vx + (c.y - y) * vy) / l2)) : 0;
         return Math.hypot(x + u * vx - c.x, y + u * vy - c.y) < c.r * 0.85;
       });
@@ -1595,7 +1633,7 @@
       var d = Math.hypot(q.x - cx, q.y - cy);
       if (d - rin < 3) return;
       var rp = Math.max(4, Math.min(18, (d - rin) / 2 + 3)), x = q.x + (cx - q.x) / d * rp, y = q.y + (cy - q.y) / d * rp;
-      if (parts.some(function (o) { return Math.hypot(o.x - x, o.y - y) < Math.min(o.r, rp) * 0.6; })) return;
+      if (parts.some(function (o) { return Math.hypot(o.x - x, o.y - y) < Math.min(o.r, rp) * 0.35; })) return;
       parts.push({ x: x, y: y, r: rp });
     });
     return { rin: Math.max(rin, 4), parts: parts };
@@ -2201,7 +2239,7 @@
     for (var s = 0; s <= n; s++) {
       var q = bezAt(b, s / n), k = G.cellOf(q.x, q.y);
       if (k < 0) { if (rr.kind === 'water') bad++; continue; }
-      if (rr.kind === 'water' ? rr.D[k] < rr.half * 0.75 : rr.hard(k)) bad++;
+      if (rr.kind === 'water' ? rr.D[k] < rr.half * 0.6 : rr.hard(k)) bad++;
     }
     return bad * len / (n + 1);
   }
@@ -2388,7 +2426,7 @@
   // Boat out and back: one lane through the stations, keeping to the middle of the water, and
   // the way back parallel to it on whichever side has room, turning in a loop at each end.
   function laneRoute(rd, LR, G, rr, sp, stops, own) {
-    var F = G.F, d = sp.track + 1.5, minR = minRadius(sp), out = [];
+    var F = G.F, d = sp.track + 1, minR = minRadius(sp), out = [];
     var centre = function (k) { var v = 1 + Math.max(0, 8 - rr.D[k]) * 0.6; if ((F[k] & CELL_SOFT) && !own[k]) v += 40; return v; };
     // the middle of the water between stations; the stations themselves stay where they are
     for (var i = 0; i < stops.length; i++) {
@@ -2653,7 +2691,7 @@
     var labelSvg = '';
     function shape(c, grow, fill, extraAttr) {
       if (c.shape) return '<path d="' + outlineD(c.x, c.y, c.shape, grow) + '" fill="' + fill + '"' + (extraAttr || '') + '/>';
-      if (free) return '<path d="' + blob({ x: c.x, y: c.y, r: c.r + grow, seed: c.seed }, 1) + '" fill="' + fill + '"' + (extraAttr || '') + '/>';
+      if (free) return '<path d="' + blob({ x: c.x, y: c.y, r: (c.r0 || c.r) + grow, seed: c.seed }, 1) + '" fill="' + fill + '"' + (extraAttr || '') + '/>';
       var s = Math.sqrt(Math.PI) * (c.r + grow);
       return '<rect x="' + f1(c.x - s / 2) + '" y="' + f1(c.y - s / 2) + '" width="' + f1(s) + '" height="' + f1(s) + '" rx="' + f1(Math.min(6, s / 6)) + '" fill="' + fill + '"' + (extraAttr || '') + '/>';
     }
@@ -2664,7 +2702,7 @@
     var lines = chains(R.net, R.kept);
     R.ents.forEach(function (e) { if (e.link) lines.push([[e.cx, e.cy], [e.link.x, e.link.y]]); });
     // every ride station gets a short path to the nearest path
-    R.circles.forEach(function (c) { if (c.type !== 'station' || c.ride.hidden) return; var nd = nearestPathNode(R, c.x, c.y); if (nd) lines.push([[c.x, c.y], [nd.x, nd.y]]); });
+    R.circles.forEach(function (c) { if (c.type !== 'station' || c.ride.hidden) return; var nd = nearestPathNode(R, c.x, c.y, c.inHab); if (nd) lines.push([[c.x, c.y], [nd.x, nd.y]]); });
     lines.forEach(function (l) {
       var d = free ? smoothPath(l, false) : 'M' + l.map(function (q) { return f1(q[0]) + ' ' + f1(q[1]); }).join('L');
       svg += '<path d="' + d + '" fill="none" stroke="#d9c79e" stroke-width="' + S.P + '" stroke-linecap="round" stroke-linejoin="round"/>';
@@ -3063,7 +3101,7 @@
     var stn = kind === 'c' && findStation(plan(), id);
     if (stn) {
       stn.st.x += dx; stn.st.y += dy;
-      if (LR && LR.R) clearStation(stn.st, rideSpecs[stn.ride.type], LR.R.circles);
+      if (LR && LR.R) clearStation(stn.st, rideSpecs[stn.ride.type], LR.R.circles, stn.ride.type, LR);
     } else if (kind === 'b') {
       var rdb = findRide(plan(), id), q = rdb && rdb.track && rdb.track[Number(parts[2])];
       if (q && !q.s) { q.x += dx; q.y += dy; }
@@ -3091,6 +3129,7 @@
     LR.R.circles.forEach(function (c) {
       if (c.type === 'part') return;
       var fs = c.type === 'station' && findStation(plan(), c.seed);
+      if (fs && (IN_HAB_OK[fs.ride.type] || onWaterAt(LR, fs.st.x, fs.st.y))) return; // allowed where it is: never bumped
       var ref = fs ? fs.st : c.type === 'staff' ? Lm.staff.filter(function (q) { return q.id === c.seed; })[0] : Lm.pos[c.seed];
       if (!ref) return;
       var fixed = c.seed === movedId;
@@ -3100,7 +3139,7 @@
         sp.parts.forEach(function (q) { items.push({ r: q.r, ref: ref, ox: q.x, oy: q.y, fixed: fixed }); });
       } else {
         var hh = (c.type === 'habitat' || c.type === 'aquarium') && plan().habitats.filter(function (x) { return 'h' + x.id === c.seed; })[0];
-        items.push({ r: hh ? Math.sqrt(Math.max(habitatInfo(hh).area, 16) / Math.PI) : c.r, ref: ref, ox: 0, oy: 0, fixed: fixed });
+        items.push({ r: hh ? blobMaxR(c.seed, Math.sqrt(Math.max(habitatInfo(hh).area, 16) / Math.PI)) : c.r, ref: ref, ox: 0, oy: 0, fixed: fixed });
       }
     });
     for (var round = 0; round < 30; round++) {

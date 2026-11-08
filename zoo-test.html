@@ -101,7 +101,9 @@
   .map-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 8px; }
   .map-head h2 { font-size: 20px; }
   .map-head .sub { color: var(--muted); font-size: 14px; }
-  .map-head #regen { margin-left: auto; }
+  .map-tools { margin-left: auto; display: inline-flex; gap: 6px; }
+  .secondary.icon { font-size: 18px; line-height: 1; padding: 6px 11px; }
+  .secondary:disabled { opacity: .4; cursor: default; }
   .map-wrap { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #f7f3ea; }
   .zoo-map { display: block; width: 100%; height: auto; max-height: 75vh; font-family: "DM Sans", system-ui, sans-serif; }
   .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 13px; }
@@ -1243,7 +1245,7 @@
     svg += '</svg>';
 
     var area = bb.w * bb.h, mapA = S.map * S.map;
-    var html = '<section class="card map-card"><div class="map-head"><h2>Layout concept</h2><span class="sub">about ' + fmt(bb.w) + ' × ' + fmt(bb.h) + ' m · ' + (Math.round(area / mapA * 1000) / 10) + '% of the map</span><button type="button" class="secondary" id="regen">Regenerate plan</button></div>';
+    var html = '<section class="card map-card"><div class="map-head"><h2>Layout concept</h2><span class="sub">about ' + fmt(bb.w) + ' × ' + fmt(bb.h) + ' m · ' + (Math.round(area / mapA * 1000) / 10) + '% of the map</span><span class="map-tools"><button type="button" class="secondary icon" id="undo" title="Undo" aria-label="Undo"' + (undoStack.length ? '' : ' disabled') + '>&#8630;</button><button type="button" class="secondary icon" id="redo" title="Redo" aria-label="Redo"' + (redoStack.length ? '' : ' disabled') + '>&#8631;</button><button type="button" class="secondary" id="regen">Regenerate plan</button></span></div>';
     html += '<div class="map-wrap">' + svg + '</div>';
     var legend = themeNames.map(function (t) { return '<span class="lg"><i style="background:' + colorOf[t] + '"></i>' + esc(t) + '</span>'; }).join('') +
       (R.circles.some(function (c) { return c.type === 'aquarium'; }) ? '<span class="lg"><i style="background:#9ccbe3;border-color:#2f6680"></i>Aquarium</span>' : '') +
@@ -1406,10 +1408,14 @@
     var Lm = toManual(plan()), LR = layoutCache.result, S = L();
     var obstacles = LR && LR.R ? LR.R.circles.map(function (c) { return { x: c.x, y: c.y, r: c.r }; }) : [];
     (LR && LR.R ? LR.R.plazas : []).forEach(function (q) { obstacles.push({ x: q.x, y: q.y, r: q.w * 0.7 }); });
-    var cx = 0, cy = 0;
-    obstacles.forEach(function (o) { cx += o.x / (obstacles.length || 1); cy += o.y / (obstacles.length || 1); });
     var r = kind === 'staff' ? Math.hypot(S.staffW, S.staffD) / 2 : Math.hypot(S.plazaW, S.plazaD) / 2;
-    var spot = freeSpot(obstacles, cx, cy, r);
+    // drop it just off the right-hand side of the zoo, so it's easy to spot; stack new ones downward
+    var right = -Infinity, top = Infinity, bottom = -Infinity;
+    obstacles.forEach(function (o) { right = Math.max(right, o.x + o.r); top = Math.min(top, o.y - o.r); bottom = Math.max(bottom, o.y + o.r); });
+    if (LR && LR.R) LR.R.ents.forEach(function (e) { right = Math.max(right, e.x + e.w); });
+    if (right === -Infinity) { right = 0; top = 0; bottom = 0; }
+    var spot = { x: right + r + 25, y: top + r };
+    for (var k = 0; k < 40 && obstacles.some(function (o) { return Math.hypot(o.x - spot.x, o.y - spot.y) < o.r + r + 6; }); k++) spot.y += r * 2 + 6;
     if (kind === 'staff') Lm.staff.push({ id: 'st' + uid(), x: spot.x, y: spot.y });
     else Lm.plazas.push({ id: 'pl' + uid(), x: spot.x, y: spot.y });
     changed();
@@ -1545,7 +1551,33 @@
   // ---------- actions ----------
   function findExhibit(id) { return plan().exhibits.filter(function (x) { return x.id === id; })[0]; }
   function findHabitat(id) { return plan().habitats.filter(function (h) { return h.id === id; })[0]; }
-  function changed() { save(); render(); }
+  // ---------- undo and redo ----------
+  var undoStack = [], redoStack = [], lastSnap = null;
+  function changed() {
+    var now = JSON.stringify(state);
+    if (lastSnap !== null && now !== lastSnap) {
+      undoStack.push(lastSnap);
+      if (undoStack.length > 60) undoStack.shift();
+      redoStack = [];
+    }
+    save(); render();
+    lastSnap = JSON.stringify(state);
+    undoButtons();
+  }
+  function undoRedo(back) {
+    var from = back ? undoStack : redoStack, to = back ? redoStack : undoStack;
+    if (!from.length) return;
+    to.push(JSON.stringify(state));
+    state = JSON.parse(from.pop());
+    save(); render();
+    lastSnap = JSON.stringify(state);
+    undoButtons();
+  }
+  function undoButtons() {
+    var u = $('undo'), r = $('redo');
+    if (u) u.disabled = !undoStack.length;
+    if (r) r.disabled = !redoStack.length;
+  }
 
   function wire() {
     $('plan-pick').addEventListener('change', function () { state.current = this.value; changed(); });
@@ -1564,6 +1596,8 @@
       changed(); toast('Zoo cleared');
     });
     $('panel').addEventListener('click', function (e) {
+      if (e.target.closest('#undo')) return undoRedo(true);
+      if (e.target.closest('#redo')) return undoRedo(false);
       if (!e.target.closest('#regen')) return;
       delete plan().layout;
       plan().setup.variant = (plan().setup.variant || 0) + 1;
@@ -1742,6 +1776,14 @@
       var s = load(); s.plans.forEach(cleanPlan); state = s; render();
     });
     render();
+    lastSnap = JSON.stringify(state);
+    undoButtons();
+    document.addEventListener('keydown', function (e) {
+      if (!(e.ctrlKey || e.metaKey) || /input|select|textarea/i.test((e.target || {}).tagName || '')) return;
+      var k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undoRedo(true); }
+      else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); undoRedo(false); }
+    });
   }
   function fail(msg) { $('panel').innerHTML = '<div class="card status">' + esc(msg) + ' Please try refreshing the page.</div>'; }
 

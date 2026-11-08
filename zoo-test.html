@@ -53,6 +53,11 @@
   .seg label:has(input:checked) { background: var(--accent); color: #fff; font-weight: 700; }
   .seg label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -3px; }
   .muted { color: var(--muted); }
+  .suggest { margin-top: 6px; border: 1px solid var(--line); border-radius: 8px; background: #fff; max-height: 300px; overflow-y: auto; display: none; overscroll-behavior: contain; }
+  .suggest .count { padding: 6px 11px; font-size: 12.5px; color: var(--muted); border-bottom: 1px solid var(--line); position: sticky; top: 0; background: #fff; }
+  .suggest.open { display: block; }
+  .suggest button { display: block; width: 100%; text-align: left; font: inherit; background: none; border: 0; padding: 8px 11px; cursor: pointer; color: var(--ink); }
+  .suggest button:hover, .suggest button.active { background: var(--accent-soft); }
   .small { font-size: 12.5px; }
 
   .panel { display: grid; gap: 14px; }
@@ -74,7 +79,10 @@
   .members { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; }
   .members li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 14px; }
   .members .mname { flex: 1 1 160px; }
-  .members select { width: auto; max-width: 220px; padding: 4px 6px; font-size: 13px; }
+  .gsize { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+  .gsize input { width: 74px; font: inherit; font-size: 14px; color: var(--ink); padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  .gsize input::placeholder { color: #9aa192; }
+  .members select { width: 200px; max-width: 100%; padding: 4px 6px; font-size: 13px; }
   .x { background: none; border: 0; color: var(--muted); font-size: 20px; line-height: 1; padding: 0 4px; }
   .x:hover { color: var(--bad); }
   .unit-foot { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; margin-top: 6px; font-size: 13px; color: var(--muted); }
@@ -126,7 +134,7 @@
           <option value="continent">Continent</option>
           <option value="biome">Biome</option>
           <option value="habitatType">Habitat type (terrestrial, avian, aquatic)</option>
-          <option value="animalType">Animal type</option>
+          <option value="animalType">Animal type (big cats and predators, grazers…)</option>
           <option value="taxonomy">Taxonomy (mammals, birds, reptiles…)</option>
         </select>
       </label>
@@ -154,13 +162,15 @@
 
     <section class="card" aria-label="Add animals">
       <h2>Add animals</h2>
-      <label class="field"><span>Habitats <span class="hint">(includes aquariums and aviaries)</span></span>
-        <select id="add-habitat"></select>
-      </label>
-      <label class="field"><span>Exhibits</span>
-        <select id="add-exhibit"></select>
-      </label>
-      <p class="muted small" style="margin:0">Habitats are sized for the largest group allowed, with every thrive need met, plus extra space.</p>
+      <div class="field picker" data-kind="habitat"><label for="add-habitat">Habitats <span class="hint">(includes aquariums and aviaries)</span></label>
+        <div class="row"><input type="text" id="add-habitat" placeholder="Search animals…" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="suggest-habitat"><button type="button" class="primary" id="add-habitat-btn">Add</button></div>
+        <div class="suggest" id="suggest-habitat" role="listbox" aria-label="Matching habitat animals"></div>
+      </div>
+      <div class="field picker" data-kind="exhibit"><label for="add-exhibit">Exhibits</label>
+        <div class="row"><input type="text" id="add-exhibit" placeholder="Search animals…" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="suggest-exhibit"><button type="button" class="primary" id="add-exhibit-btn">Add</button></div>
+        <div class="suggest" id="suggest-exhibit" role="listbox" aria-label="Matching exhibit animals"></div>
+      </div>
+      <p class="muted small" style="margin:0">Habitats are sized for each animal's group size, with every thrive need met, plus extra space. Leave a group size blank to use the largest group allowed automatically (shown in grey).</p>
     </section>
 
     <section class="card" aria-label="Backup">
@@ -498,9 +508,6 @@
 
   function habitatHtml(u, allHab) {
     var h = u.h, keys = u.keys;
-    var view = keys.map(function (k) { return (extra[k] || {}).view; }).filter(Boolean)
-      .sort(function (x, y) { return VIEW_ORDER.indexOf(norm(y)) - VIEW_ORDER.indexOf(norm(x)); })[0];
-    var viewDist = view ? setting('Bad View Distance: ' + view + ' (m)') : null;
     var html = '<div class="unit"><div class="unit-head"><span class="unit-title">' + (u.aquarium ? 'Aquarium ' : 'Habitat ') + u.num + '</span>' +
       '<span class="area">' + fmt(u.area) + ' m² <span class="muted small">(' + fmt(u.base) + ' + ' + (setting('Extra Space (%)') || 0) + '%)</span></span></div>';
     html += '<ul class="members">';
@@ -509,14 +516,15 @@
       var moveOpts = '<option value="">Move to…</option>';
       allHab.forEach(function (o) { if (o.h !== h) moveOpts += '<option value="' + o.h.id + '">' + esc(habitatLabel(o.h, o.num)) + '</option>'; });
       if (h.members.length > 1) moveOpts += '<option value="__new">Its own habitat</option>';
-      html += '<li><span class="mname"><strong>' + esc(a.name) + '</strong> <span class="muted">· ' +
-        (m.n ? m.n : 'up to ' + memberCount(m)) + ' ' + (a.collective ? (memberCount(m) === 1 ? 'collective' : 'collectives') : 'animals') + '</span></span>' +
+      var big = largestGroup(a), unit = a.collective ? 'collectives' : 'animals';
+      html += '<li><span class="mname"><strong>' + esc(a.name) + '</strong></span>' +
+        '<label class="gsize">Group size <input type="number" min="1" step="1" inputmode="numeric" data-action="size" data-h="' + h.id + '" data-i="' + idx + '"' +
+        ' value="' + (m.n || '') + '" placeholder="' + big + '" aria-label="' + esc(a.name) + ' group size (' + unit + '). Blank means the largest group, ' + big + '"></label>' +
         (allHab.length > 1 || h.members.length > 1 ? '<select data-action="move" data-h="' + h.id + '" data-i="' + idx + '" aria-label="Move ' + esc(a.name) + '">' + moveOpts + '</select>' : '') +
         '<button type="button" class="x" data-action="remove-member" data-h="' + h.id + '" data-i="' + idx + '" aria-label="Remove ' + esc(a.name) + '">×</button></li>';
     });
     html += '</ul>';
-    html += '<div class="unit-foot">' + themeSelect(u, 'h', h.id) +
-      (view ? '<span>Guest view: ' + esc(view) + (viewDist ? ', keep every part within ' + viewDist + ' m of a path' : '') + '</span>' : '') + '</div>';
+    html += '<div class="unit-foot">' + themeSelect(u, 'h', h.id) + '</div>';
     if (u.problems.length) html += '<div class="note bad"><strong>These animals can’t share a habitat:</strong> ' + u.problems.map(esc).join(' ') + '</div>';
     u.needs.forEach(function (n) {
       var inPlan = {};
@@ -547,10 +555,44 @@
     Array.prototype.forEach.call(document.querySelectorAll('input[name=shape]'), function (r) { r.checked = r.value === p.setup.shape; });
     $('plan-del').disabled = state.plans.length < 2;
   }
+  // Search boxes for adding animals (type to narrow the list, like the Habitat Planner).
+  function makePicker(kind, getList, onPick) {
+    var input = $('add-' + kind), box = $('suggest-' + kind), btn = $('add-' + kind + '-btn'), active = -1;
+    function matches() { var q = norm(input.value); return getList().filter(function (a) { return !q || a.key.indexOf(q) >= 0; }); }
+    function show(open) {
+      input.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (!open) { box.classList.remove('open'); box.innerHTML = ''; return; }
+      var list = matches();
+      if (active >= list.length) active = list.length - 1;
+      box.innerHTML = !list.length ? '<div class="count">No matching animals</div>' :
+        '<div class="count">' + list.length + ' animal' + (list.length === 1 ? '' : 's') + '</div>' +
+        list.map(function (a, i) { return '<button type="button" role="option" data-key="' + esc(a.key) + '"' + (i === active ? ' class="active"' : '') + '>' + esc(a.name) + '</button>'; }).join('');
+      box.classList.add('open');
+      var act = box.querySelector('button.active'); if (act) act.scrollIntoView({ block: 'nearest' });
+    }
+    function pick(key) { input.value = ''; active = -1; show(false); onPick(key); }
+    function fromInput() {
+      var q = norm(input.value); if (!q) { show(true); input.focus(); return; }
+      var list = matches(), exact = list.filter(function (a) { return a.key === q; })[0];
+      var a = exact || (active >= 0 ? list[active] : list[0]);
+      if (a) pick(a.key);
+    }
+    input.addEventListener('input', function () { active = -1; show(true); });
+    input.addEventListener('focus', function () { show(true); });
+    input.addEventListener('keydown', function (e) {
+      var n = matches().length;
+      if (e.key === 'ArrowDown') { active = Math.min(active + 1, n - 1); show(true); e.preventDefault(); }
+      else if (e.key === 'ArrowUp') { active = Math.max(active - 1, 0); show(true); e.preventDefault(); }
+      else if (e.key === 'Enter') { fromInput(); e.preventDefault(); }
+      else if (e.key === 'Escape') { show(false); }
+    });
+    box.addEventListener('mousedown', function (e) { var b = e.target.closest('button[data-key]'); if (b) { e.preventDefault(); pick(b.getAttribute('data-key')); } });
+    btn.addEventListener('click', fromInput);
+    document.addEventListener('click', function (e) { if (!e.target.closest('.picker[data-kind="' + kind + '"]')) show(false); });
+  }
   function fillAddLists() {
-    var hab = model.pickable;
-    $('add-habitat').innerHTML = '<option value="">Add an animal to a habitat…</option>' + hab.map(function (a) { return '<option value="' + esc(a.key) + '">' + esc(a.name) + '</option>'; }).join('');
-    $('add-exhibit').innerHTML = '<option value="">Add an exhibit animal…</option>' + exhibitAnimals.map(function (a) { return '<option value="' + esc(a.key) + '">' + esc(a.name) + '</option>'; }).join('');
+    makePicker('habitat', function () { return model.pickable; }, addHabitatAnimal);
+    makePicker('exhibit', function () { return exhibitAnimals; }, addExhibitAnimal);
   }
 
   // ---------- actions ----------
@@ -579,22 +621,20 @@
       r.addEventListener('change', function () { if (this.checked) { plan().setup.shape = this.value; changed(); } });
     });
 
-    $('add-habitat').addEventListener('change', function () {
-      var k = this.value; if (!k) return;
+  }
+  function addHabitatAnimal(k) {
       plan().habitats.push({ id: uid(), members: [{ key: k, n: null }], manual: false, imported: null, theme: {} });
       autoPair();
-      this.value = '';
       changed();
       var h = plan().habitats.filter(function (x) { return x.members.some(function (m) { return m.key === k; }); }).pop();
       toast(nameOf(k) + (h && h.members.length > 1 ? ' added, sharing with ' + keysOf(h.members).filter(function (x) { return x !== k; }).map(nameOf).join(', ') : ' added'));
-    });
-    $('add-exhibit').addEventListener('change', function () {
-      var k = this.value; if (!k) return;
+  }
+  function addExhibitAnimal(k) {
       plan().exhibits.push({ id: uid(), key: k, theme: {} });
-      this.value = '';
       changed();
       toast(nameOf(k) + ' exhibit added');
-    });
+  }
+  function wirePanel() {
 
     $('panel').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-action]'); if (!b) return;
@@ -611,7 +651,12 @@
     });
     $('panel').addEventListener('change', function (e) {
       var s = e.target, act = s.getAttribute('data-action'), p = plan(), type = p.setup.theme;
-      if (act === 'theme') {
+      if (act === 'size') {
+        var hs = findHabitat(s.getAttribute('data-h')), mi = hs.members[Number(s.getAttribute('data-i'))];
+        var v = Math.floor(Number(s.value));
+        mi.n = s.value.trim() !== '' && v >= 1 ? v : null;
+        changed();
+      } else if (act === 'theme') {
         var target = s.getAttribute('data-h') ? findHabitat(s.getAttribute('data-h')) : p.exhibits.filter(function (x) { return x.id === s.getAttribute('data-e'); })[0];
         target.theme = target.theme || {};
         if (s.value) target.theme[type] = s.value; else delete target.theme[type];
@@ -677,6 +722,7 @@
     });
     fillAddLists();
     wire();
+    wirePanel();
     render();
   }
   function fail(msg) { $('panel').innerHTML = '<div class="card status">' + esc(msg) + ' Please try refreshing the page.</div>'; }

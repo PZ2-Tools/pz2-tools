@@ -104,7 +104,7 @@
   .secondary.icon { font-size: 18px; line-height: 1; padding: 6px 11px; }
   .secondary:disabled { opacity: .4; cursor: default; }
   .map-wrap { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #f7f3ea; }
-  .zoo-map { display: block; width: 100%; height: auto; max-height: 75vh; font-family: "DM Sans", system-ui, sans-serif; }
+  .zoo-map { user-select: none; -webkit-user-select: none; display: block; width: 100%; height: auto; max-height: 75vh; font-family: "DM Sans", system-ui, sans-serif; }
   .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 13px; }
   .legend .lg { display: inline-flex; align-items: center; gap: 6px; }
   .legend i { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,.18); display: inline-block; }
@@ -117,6 +117,21 @@
   .key-theme h3 i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid rgba(0,0,0,.15); }
   .key-theme ul { list-style: none; margin: 0; padding: 0; font-size: 13px; display: grid; gap: 2px; }
   .key-theme b { display: inline-block; min-width: 22px; }
+  .rides { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+  .rides h3 { font-family: "DM Sans", sans-serif; font-size: 13px; font-weight: 700; margin: 0; text-transform: uppercase; letter-spacing: .04em; }
+  .rides p { margin: 0; }
+  .ride { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: grid; gap: 6px; }
+  .ride.editing { border-color: var(--accent); background: var(--accent-soft); }
+  .ride-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+  .ride-head i { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+  .ride-btns { margin-left: auto; display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  button.secondary.small { font-size: 13px; padding: 4px 10px; }
+  button.secondary.on { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
+  .ride-help { margin: 0; }
+  .ride .note { margin-top: 0; }
+  .zoo-map .trk { cursor: pointer; }
+  .shape-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 10px; font-size: 14px; }
+  .shape-bar .ride-btns { margin-left: auto; }
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(20px); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 50; max-width: calc(100% - 32px); }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   footer { padding: 0 10px 24px; color: var(--muted); font-size: 12.5px; }
@@ -178,9 +193,9 @@
         <div class="suggest" id="suggest-exhibit" role="listbox" aria-label="Matching exhibit animals"></div>
       </div>
       <label class="field"><span>Add to the map</span>
-        <select id="add-facility"><option value="">Add a staff area or plaza…</option><option value="staff">Staff area</option><option value="plaza">Guest plaza</option></select>
+        <select id="add-facility"><option value="">Add a staff area, plaza or ride station…</option><option value="staff">Staff area</option><option value="plaza">Guest plaza</option></select>
       </label>
-      <p class="muted small" style="margin:0">Drag anything on the map to move it; the paths follow. Tap a staff area or plaza to remove it. Habitats are sized for each animal's group size, with every thrive need met, plus extra space. Leave a group size blank to use the largest group allowed automatically (shown in grey).</p>
+      <p class="muted small" style="margin:0">Drag anything on the map to move it; the paths follow. Tap a habitat to change its shape. Tap a staff area, plaza or ride station to remove it. Habitats are sized for each animal's group size, with every thrive need met, plus extra space. Leave a group size blank to use the largest group allowed automatically (shown in grey).</p>
     </section>
 
     <section class="card" aria-label="Backup">
@@ -590,6 +605,9 @@
     }
     var pts = circles.map(function (c) { return [c.x, c.y]; });
     var nodes = [], edges = [];
+    // pieces of a stretched habitat's outline stand for the habitat itself
+    var own = function (k) { var c = circles[k]; return c.owner ? real.indexOf(c.owner) : k; };
+    var uniq = function (a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }); };
     if (circles.length < 3) {
       // too few to triangulate: a small ring around them
       var cx = 0, cy = 0, R = 0;
@@ -632,11 +650,12 @@
       if (!n1.ok || !n2.ok) continue;
       var i = T[e], j = T[e % 3 === 2 ? e - 2 : e + 1], ci = circles[i], cj = circles[j];
       if (ci.ghost && cj.ghost) continue;
+      if ((ci.owner || cj.owner) && own(i) === own(j)) continue; // never through the middle of a stretched habitat
       // the path must squeeze between the two enclosures, not through them
       if (segDist(n1.x, n1.y, n2.x, n2.y, ci.x, ci.y) < ci.r * 0.9 || segDist(n1.x, n1.y, n2.x, n2.y, cj.x, cj.y) < cj.r * 0.9) continue;
       // a path only counts as passing an enclosure if it actually runs close beside it
       var near = function (k) { var c = circles[k]; return !c.ghost && segDist(n1.x, n1.y, n2.x, n2.y, c.x, c.y) - c.r <= 14; };
-      edges.push({ a: t1, b: t2, len: Math.hypot(n1.x - n2.x, n1.y - n2.y), fronts: [i, j].filter(near) });
+      edges.push({ a: t1, b: t2, len: Math.hypot(n1.x - n2.x, n1.y - n2.y), fronts: uniq([i, j].filter(near).map(own)) });
     }
     return { nodes: nodes, edges: edges };
   }
@@ -681,10 +700,10 @@
         else if (e.fronts.length === 1) outer[e.fronts[0]] = true;
       });
       var cx = 0, cy = 0, wsum = 0, total = 0;
-      circles.forEach(function (c) { if (c.type !== 'staff') { cx += c.x * c.A; cy += c.y * c.A; wsum += c.A; total += c.A; } });
+      circles.forEach(function (c) { if (!isBack(c)) { cx += c.x * c.A; cy += c.y * c.A; wsum += c.A; total += c.A; } });
       cx /= wsum || 1; cy /= wsum || 1;
       var dist = function (i) { return Math.hypot(circles[i].x - cx, circles[i].y - cy); };
-      var order = circles.map(function (c, i) { return i; }).filter(function (i) { return circles[i].type !== 'staff'; }).sort(function (a, b) { return dist(a) - dist(b); });
+      var order = circles.map(function (c, i) { return i; }).filter(function (i) { return !isBack(circles[i]); }).sort(function (a, b) { return dist(a) - dist(b); });
       var inside = {}, area = 0;
       if (order.length) { inside[order[0]] = true; area = circles[order[0]].A; }
       for (var grow = 0; grow < circles.length && area < total * 0.45; grow++) {
@@ -692,7 +711,7 @@
         Object.keys(inside).forEach(function (i) {
           Object.keys(nb[i]).forEach(function (j) {
             j = Number(j);
-            if (inside[j] || outer[j] || circles[j].type === 'staff') return;
+            if (inside[j] || outer[j] || isBack(circles[j])) return;
             if (cand === null || dist(j) < dist(cand)) cand = j;
           });
         });
@@ -708,13 +727,13 @@
         // a loop round each theme: every gap between two different themes
         net.edges.forEach(function (e, i) { var a = circles[e.fronts[0]], b = circles[e.fronts[1]]; if (e.fronts.length === 2 && a.cluster >= 0 && b.cluster >= 0 && a.cluster !== b.cluster) kept[i] = true; });
         // and round the outside of each theme that's on the edge of the zoo
-        net.edges.forEach(function (e, i) { if (e.fronts.length === 1 && circles[e.fronts[0]].cluster >= 0 && circles[e.fronts[0]].type !== 'staff') kept[i] = true; });
+        net.edges.forEach(function (e, i) { if (e.fronts.length === 1 && circles[e.fronts[0]].cluster >= 0 && !isBack(circles[e.fronts[0]])) kept[i] = true; });
       }
     }
     // every enclosure must be on a path (big habitats on two sides, so all of them can be seen)
     var fronting = circles.map(function () { return []; });
     net.edges.forEach(function (e, i) { e.fronts.forEach(function (c) { fronting[c].push(i); }); });
-    function need(c) { return c.type === 'staff' ? 0 : 1; } // staff areas don't need a guest path
+    function need(c) { return isBack(c) ? 0 : 1; } // staff areas and ride stations don't need a path past them
     for (var pass = 0; pass < 2; pass++) {
       circles.forEach(function (c, ci) {
         var have = fronting[ci].filter(function (ei) { return kept[ei]; }).length;
@@ -759,7 +778,7 @@
     cx /= wsum || 1; cy /= wsum || 1;
     var habs = circles.filter(function (c) { return c.type === 'habitat' || c.type === 'aquarium'; });
     var staffNow = circles.filter(function (c) { return c.type === 'staff'; });
-    var covered = habs.map(function (h) { return staffNow.some(function (s) { return gapBetween(s, h) <= S.staffMax; }); });
+    var covered = habs.map(function (h) { return staffNow.some(function (s) { return habGap(s, h) <= S.staffMax; }); });
     var cands = [];
     circles.forEach(function (c) {
       var base = Math.atan2(c.y - cy, c.x - cx);
@@ -774,13 +793,13 @@
       cands.forEach(function (cd) {
         if (cd.used) return;
         var gain = 0;
-        habs.forEach(function (h, i) { if (!covered[i] && gapBetween(cd, h) <= S.staffMax) gain += 1; });
+        habs.forEach(function (h, i) { if (!covered[i] && habGap(cd, h) <= S.staffMax) gain += 1; });
         if (gain && (!best || gain > best.gain)) best = { gain: gain, cd: cd };
       });
       if (!best) break;
       var st = { type: 'staff', x: best.cd.x, y: best.cd.y, r: sr, A: S.staffW * S.staffD, theme: null, seed: 'rs' + guard, label: 'Staff', short: 'S', title: 'Staff area (keeper huts and other staff buildings)', cluster: -1 };
       circles.push(st);
-      habs.forEach(function (h, i) { if (gapBetween(st, h) <= S.staffMax) covered[i] = true; });
+      habs.forEach(function (h, i) { if (habGap(st, h) <= S.staffMax) covered[i] = true; });
       cands.forEach(function (cd) { if (Math.hypot(cd.x - st.x, cd.y - st.y) < 2 * sr + 6) cd.used = true; });
     }
   }
@@ -816,6 +835,10 @@
       while (res.prev[node] >= 0 && g++ < 5000) { var ei = res.prev[node], e = net.edges[ei]; kept[ei] = true; node = e.a === node ? e.b : e.a; }
     }
   }
+  // staff areas and ride stations: blocks that paths go round but don't need to pass
+  function isBack(c) { return c.type === 'staff' || c.type === 'station' || c.type === 'part'; }
+  // gap from a staff area (or anything round) to a habitat, using a stretched habitat's real outline
+  function habGap(a, h) { var g = gapBetween(a, h); (h.parts || []).forEach(function (q) { g = Math.min(g, gapBetween(a, q)); }); return g; }
   function gapBetween(a, b) { return Math.hypot(a.x - b.x, a.y - b.y) - a.r - b.r; }
 
   // One complete attempt; returns the plan and any rule that failed.
@@ -839,7 +862,7 @@
     // rule: a staff area within reach of every habitat
     var staff = circles.filter(function (c) { return c.type === 'staff'; });
     circles.forEach(function (c) {
-      if ((c.type === 'habitat' || c.type === 'aquarium') && !staff.some(function (s) { return gapBetween(s, c) <= S.staffMax; })) problems.push({ kind: 'staff', theme: c.theme, seed: c.seed, weight: c.A });
+      if ((c.type === 'habitat' || c.type === 'aquarium') && !staff.some(function (s) { return habGap(s, c) <= S.staffMax; })) problems.push({ kind: 'staff', theme: c.theme, seed: c.seed, weight: c.A });
     });
     // entrances: just outside the zoo, beside an outer habitat, spaced round the edge
     var cx = 0, cy = 0, wsum = 0;
@@ -986,7 +1009,7 @@
   function computeLayout(units, themeNames, p) {
     var S = L(), style = 'theme-loops', variant = p.setup.variant || 0;
     R_VARIANT = variant;
-    var key = JSON.stringify([variant, p.layout || null, p.setup.entrances, S, themeNames, units.map(function (u) { return [u.kind, u.num, u.themeNow, Math.round(u.area), u.keys, u.w, u.d]; })]);
+    var key = JSON.stringify([variant, p.layout || null, ridesOf(p).map(function (rd) { return [rd.type, rd.stations.map(function (st) { return [st.id, f1(st.x), f1(st.y)]; })]; }), p.setup.entrances, S, themeNames, units.map(function (u) { return [u.kind, u.num, u.themeNow, Math.round(u.area), u.keys, u.w, u.d]; })]);
     if (layoutCache.key === key) return layoutCache.result;
     if (!window.d3 || !d3.packSiblings || !d3.Delaunay) throw new Error('The drawing library didn’t load. Please refresh the page.');
     if (p.layout && p.layout.manual) {
@@ -1049,6 +1072,24 @@
     (Lm.staff || []).forEach(function (st) {
       circles.push({ type: 'staff', x: st.x, y: st.y, r: sr, A: S.staffW * S.staffD, theme: null, cluster: -1, seed: st.id, label: 'Staff', short: 'S', title: 'Staff area (keeper huts and other staff buildings)' });
     });
+    // ride stations: blocks that paths go round, like staff areas
+    ridesOf(p).forEach(function (rd) {
+      var sp = rideSpecs[rd.type];
+      rd.stations.forEach(function (st) {
+        circles.push({ type: 'station', x: st.x, y: st.y, r: Math.sqrt(sp.w * sp.d / Math.PI), A: sp.w * sp.d, theme: null, cluster: -1, seed: st.id, ride: rd, w: sp.w, d: sp.d, title: rd.name + ' station' });
+      });
+    });
+    // stretched habitats: fit the outline to the habitat's size and fill it with round pieces,
+    // so everything else goes round the real shape
+    circles.slice().forEach(function (c) {
+      var q = Lm.pos[c.seed];
+      if (!q || !q.shape || !(c.type === 'habitat' || c.type === 'aquarium')) return;
+      if (Math.abs(shapeArea(q.shape) - c.A) > c.A * 0.005) { q.shape = scaleShape(q.shape, c.A); placedNew = true; }
+      var sp = shapeParts(c.x, c.y, q.shape);
+      c.shape = q.shape; c.r = sp.rin;
+      c.parts = sp.parts.map(function (pp, k) { return { type: 'part', x: pp.x, y: pp.y, r: pp.r, A: 0, theme: null, cluster: -1, seed: c.seed + '#' + k, owner: c }; });
+      Array.prototype.push.apply(circles, c.parts);
+    });
     // new enclosures go in a free spot near the rest of their theme
     circles.filter(function (c) { return c.pending; }).forEach(function (c) {
       var mates = circles.filter(function (o) { return !o.pending && o.theme === c.theme; }), base = mates.length ? mates : circles.filter(function (o) { return !o.pending; });
@@ -1097,7 +1138,7 @@
     var LR = layoutCache.result;
     var Lm = { manual: true, pos: {}, staff: [], plazas: [], ents: [] };
     if (LR && LR.R) {
-      LR.R.circles.forEach(function (c) { if (c.type === 'staff') Lm.staff.push({ id: c.seed, x: c.x, y: c.y }); else Lm.pos[c.seed] = { x: c.x, y: c.y }; });
+      LR.R.circles.forEach(function (c) { if (c.type === 'station') return; if (c.type === 'staff') Lm.staff.push({ id: c.seed, x: c.x, y: c.y }); else Lm.pos[c.seed] = { x: c.x, y: c.y }; });
       LR.R.plazas.forEach(function (q) { if (q.mine) Lm.plazas.push({ id: q.id, x: q.x, y: q.y }); });
       LR.R.ents.forEach(function (e) { Lm.ents.push({ x: e.cx, y: e.cy }); });
     }
@@ -1111,6 +1152,509 @@
     (ents || []).forEach(function (e) { x0 = Math.min(x0, e.x); y0 = Math.min(y0, e.y); x1 = Math.max(x1, e.x + e.w); y1 = Math.max(y1, e.y + e.d); });
     if (x0 === Infinity) return { x: 0, y: 0, w: 1, h: 1 };
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
+  // ---------- TRANSPORT RIDES ----------
+  // Ride sizes and turning limits come from the Rides tab. Stations are dropped on the
+  // map by the player; "Link stations" draws one smooth loop through all of a ride's
+  // stations. A track is a list of bend points (or station references) joined by a
+  // smooth curve. A point marked g:true means the stretch of track after it was deleted.
+  var RIDE_TYPES = [
+    { type: 'gondola', match: /gondola/i, name: 'Gondola', short: 'G', d: { w: 8, d: 12, track: 4, turn: 90, minLen: 8, maxLen: 30 } },
+    { type: 'monorail', match: /monorail/i, name: 'Monorail', short: 'M', d: { w: 12, d: 12, track: 4, turn: 30, minLen: 8, maxLen: 30 } },
+    { type: 'jeep', match: /4x4|adventure/i, name: '4x4 Adventure Tour', short: 'J', d: { w: 12, d: 12, track: 4, turn: 90, minLen: 8, maxLen: 30 } },
+    { type: 'train', match: /train/i, name: 'Steam Train', short: 'T', d: { w: 32, d: 16, track: 4, turn: 36, minLen: 11, maxLen: 30 } },
+    { type: 'boat', match: /river|boat/i, name: 'Riverboat', short: 'B', d: { w: 12, d: 12, track: 4, turn: 90, minLen: 12, maxLen: 30 } }
+  ];
+  var BUILT_RIDES = ['gondola', 'monorail']; // the ride types the planner can place so far
+  var RIDE_COLORS = ['#2563a8', '#a8327e', '#0e7f7b', '#c2571a', '#6a3fb0', '#4a5a6b', '#7a6a0e', '#1f3f8a'];
+  var TIGHT_COLOR = '#d0281b';
+  var rideSpecs = {}, editRide = null, delMode = false;
+  RIDE_TYPES.forEach(function (t) { rideSpecs[t.type] = Object.assign({ type: t.type, name: t.name, short: t.short }, t.d); });
+
+  function readRides(data, warnings) {
+    var raw = (data.tabs && data.tabs['Rides']) || { header: [], rows: [] };
+    var H = raw.header.map(norm);
+    function col(re, nth) { var hits = []; H.forEach(function (h, i) { if (re.test(h)) hits.push(i); }); return hits[nth || 0]; }
+    var iName = col(/^ride/), iW = col(/station width/), iD = col(/station depth/), iT = col(/track width/), iTurn = col(/turn/);
+    var iMin = col(/piece.*min/), iMax = col(/piece.*max/);
+    if (iMax === undefined) iMax = col(/piece.*min/, 1); // two "Minimum" headings: the second one is the maximum
+    if (iName === undefined) return; // no Rides tab: standard sizes are used
+    raw.rows.forEach(function (r) {
+      var nm = String(r[iName] == null ? '' : r[iName]).trim(), t = RIDE_TYPES.filter(function (x) { return x.match.test(nm); })[0];
+      if (!t) return;
+      var sp = rideSpecs[t.type];
+      function set(k, i) { if (i === undefined) return; var v = PZ.num(r[i]); if (v > 0) sp[k] = v; }
+      set('w', iW); set('d', iD); set('track', iT); set('turn', iTurn); set('minLen', iMin); set('maxLen', iMax);
+      if (sp.maxLen < sp.minLen) sp.maxLen = sp.minLen;
+    });
+  }
+  // the tightest bend: the shortest track piece turned as far as it can go
+  function minRadius(sp) { var a = Math.min(Math.max(sp.turn, 1), 179) * Math.PI / 180; return sp.minLen / a; }
+  function ridesOf(p) { return p.rides || (p.rides = []); }
+  function findRide(p, id) { return ridesOf(p).filter(function (r) { return r.id === id; })[0]; }
+  function findStation(p, sid) {
+    var out = null;
+    ridesOf(p).some(function (rd) { return rd.stations.some(function (st) { if (st.id === sid) { out = { ride: rd, st: st }; return true; } }); });
+    return out;
+  }
+  function hasStations(p) { return ridesOf(p).some(function (rd) { return rd.stations.length; }); }
+  function clearRides(p) { p.rides = []; editRide = null; delMode = false; }
+  // track points with station positions filled in
+  function trackPts(rd) {
+    return (rd.track || []).map(function (q) {
+      if (q.s) { var st = rd.stations.filter(function (x) { return x.id === q.s; })[0]; return st ? { x: st.x, y: st.y, s: q.s, g: !!q.g } : null; }
+      return { x: q.x, y: q.y, g: !!q.g };
+    }).filter(Boolean);
+  }
+  // remove one point from a track; a deleted stretch on either side stays deleted
+  function dropPoint(rd, i) {
+    var T = rd.track, n = T.length, prev = T[(i - 1 + n) % n];
+    if (T[i].g) prev.g = true;
+    T.splice(i, 1);
+    if (T.length < 3) rd.track = null;
+  }
+  // the smooth curve between point i and the next (same curve as the paths use)
+  function segBez(P, i) {
+    // like the paths' curve, but the bend at each point is scaled to the length of the stretch,
+    // so unevenly spaced points don't make kinks
+    var n = P.length, p0 = P[(i - 1 + n) % n], p1 = P[i], p2 = P[(i + 1) % n], p3 = P[(i + 2) % n];
+    var d01 = Math.hypot(p1.x - p0.x, p1.y - p0.y), d12 = Math.hypot(p2.x - p1.x, p2.y - p1.y), d23 = Math.hypot(p3.x - p2.x, p3.y - p2.y);
+    var k1 = d12 / 3 / ((d01 + d12) || 1), k2 = d12 / 3 / ((d12 + d23) || 1);
+    return [p1, { x: p1.x + (p2.x - p0.x) * k1, y: p1.y + (p2.y - p0.y) * k1 }, { x: p2.x - (p3.x - p1.x) * k2, y: p2.y - (p3.y - p1.y) * k2 }, p2];
+  }
+  function bezAt(b, t) {
+    var u = 1 - t;
+    return {
+      x: u * u * u * b[0].x + 3 * u * u * t * b[1].x + 3 * u * t * t * b[2].x + t * t * t * b[3].x,
+      y: u * u * u * b[0].y + 3 * u * u * t * b[1].y + 3 * u * t * t * b[2].y + t * t * t * b[3].y
+    };
+  }
+  function bezRadius(b, t) {
+    var u = 1 - t;
+    var dx = 3 * u * u * (b[1].x - b[0].x) + 6 * u * t * (b[2].x - b[1].x) + 3 * t * t * (b[3].x - b[2].x);
+    var dy = 3 * u * u * (b[1].y - b[0].y) + 6 * u * t * (b[2].y - b[1].y) + 3 * t * t * (b[3].y - b[2].y);
+    var ex = 6 * u * (b[2].x - 2 * b[1].x + b[0].x) + 6 * t * (b[3].x - 2 * b[2].x + b[1].x);
+    var ey = 6 * u * (b[2].y - 2 * b[1].y + b[0].y) + 6 * t * (b[3].y - 2 * b[2].y + b[1].y);
+    var sp = Math.hypot(dx, dy), cr = Math.abs(dx * ey - dy * ex);
+    if (sp < 1e-6) return 0;
+    return cr < 1e-9 ? Infinity : sp * sp * sp / cr;
+  }
+  // each stretch of track: its curve, and whether it bends tighter than the ride allows
+  function trackGeo(P, sp) {
+    var segs = [], minR = minRadius(sp);
+    if (P.length < 3) return segs;
+    for (var i = 0; i < P.length; i++) {
+      var b = segBez(P, i), rmin = Infinity, len = 0, last = b[0];
+      for (var k = 1; k <= 16; k++) {
+        var t = k / 16, q = bezAt(b, t);
+        len += Math.hypot(q.x - last.x, q.y - last.y); last = q;
+      }
+      for (k = 0; k <= 16; k++) rmin = Math.min(rmin, bezRadius(b, k / 16));
+      segs.push({ i: i, b: b, len: len, gap: P[i].g, rmin: rmin, tight: rmin < minR * 0.97,
+        d: 'M' + f1(b[0].x) + ' ' + f1(b[0].y) + 'C' + f1(b[1].x) + ' ' + f1(b[1].y) + ',' + f1(b[2].x) + ' ' + f1(b[2].y) + ',' + f1(b[3].x) + ' ' + f1(b[3].y) });
+    }
+    return segs;
+  }
+  // the shortest round trip through the stations
+  function stationOrder(st) {
+    var n = st.length, D = function (a, b) { return Math.hypot(st[a].x - st[b].x, st[a].y - st[b].y); };
+    var tour = st.map(function (s, i) { return i; });
+    if (n <= 3) return tour;
+    function cost(t) { var c = 0; for (var i = 0; i < t.length; i++) c += D(t[i], t[(i + 1) % t.length]); return c; }
+    if (n <= 8) {
+      var best = null, rest = tour.slice(1);
+      (function perm(a, k) {
+        if (k === a.length) { var t = [0].concat(a), c = cost(t); if (!best || c < best.c) best = { c: c, t: t }; return; }
+        for (var i = k; i < a.length; i++) { var x = a[k]; a[k] = a[i]; a[i] = x; perm(a, k + 1); x = a[k]; a[k] = a[i]; a[i] = x; }
+      })(rest, 0);
+      return best.t;
+    }
+    // many stations: nearest neighbour, then untangle crossings
+    var left = tour.slice(1), t = [0];
+    while (left.length) { var lastI = t[t.length - 1]; left.sort(function (a, b) { return D(lastI, a) - D(lastI, b); }); t.push(left.shift()); }
+    for (var pass = 0, better = true; better && pass < 50; pass++) {
+      better = false;
+      for (var i = 0; i < n - 1; i++) for (var j = i + 2; j < n; j++) {
+        var a = t[i], b = t[i + 1], c = t[j], d = t[(j + 1) % n];
+        if (D(a, c) + D(b, d) < D(a, b) + D(c, d) - 0.01) { var seg = t.slice(i + 1, j + 1).reverse(); t.splice.apply(t, [i + 1, j - i].concat(seg)); better = true; }
+      }
+    }
+    return t;
+  }
+  // Draw one loop through every station of a ride.
+  function linkRide(rd, centre) {
+    var sp = rideSpecs[rd.type], st = rd.stations, n = st.length, minR = minRadius(sp);
+    if (!n) return;
+    var P = [];
+    if (n === 1) {
+      // a single station: a round loop beside it, on the side away from the zoo
+      var s = st[0], ux = s.x - centre.x, uy = s.y - centre.y, ul = Math.hypot(ux, uy) || 1, R0 = Math.max(minR * 2, 30);
+      ux /= ul; uy /= ul;
+      var ccx = s.x + ux * R0, ccy = s.y + uy * R0, a0 = Math.atan2(s.y - ccy, s.x - ccx);
+      for (var k = 0; k < 8; k++) {
+        var a = a0 + k * Math.PI / 4;
+        P.push(k ? { x: ccx + R0 * Math.cos(a), y: ccy + R0 * Math.sin(a) } : { s: s.id });
+      }
+    } else {
+      var ord = stationOrder(st), area = 0, per = 0;
+      ord.forEach(function (i, k) { var a = st[i], b = st[ord[(k + 1) % n]]; area += a.x * b.y - b.x * a.y; per += Math.hypot(b.x - a.x, b.y - a.y); });
+      area = Math.abs(area) / 2;
+      if (n >= 3 && 4 * Math.PI * area / (per * per) > 0.25) P = ord.map(function (i) { return { s: st[i].id }; });
+      else P = racetrack(st, minR);
+    }
+    // bend points along the way, about one track piece apart at most, so the loop can be reshaped
+    rd.track = P;
+    var R = trackPts(rd), out = [], step = Math.max(sp.maxLen || 30, 20);
+    R.forEach(function (q, i) {
+      out.push(P[i]);
+      var b = segBez(R, i), len = 0, last = b[0];
+      for (var k = 1; k <= 24; k++) { var qq = bezAt(b, k / 24); len += Math.hypot(qq.x - last.x, qq.y - last.y); last = qq; }
+      var extra = Math.max(0, Math.ceil(len / step) - 1);
+      for (var e = 1; e <= extra; e++) { var m = bezAt(b, e / (extra + 1)); out.push({ x: m.x, y: m.y }); }
+    });
+    rd.track = out;
+    // ease any bend that's too tight, the same way as the Correct track button
+    correctTrack(rd);
+  }
+  // Stations roughly in a line: a racetrack-shaped loop, out along the stations and back
+  // along a parallel line, so the track never doubles back on itself.
+  function racetrack(st, minR) {
+    var n = st.length, cx = 0, cy = 0, far = null;
+    st.forEach(function (q) { cx += q.x / n; cy += q.y / n; });
+    st.forEach(function (a) { st.forEach(function (b) { var d = Math.hypot(a.x - b.x, a.y - b.y); if (!far || d > far.d) far = { d: d, a: a, b: b }; }); });
+    var ux = (far.b.x - far.a.x) / (far.d || 1), uy = (far.b.y - far.a.y) / (far.d || 1), vx = -uy, vy = ux;
+    var W = function (t, o) { return { x: cx + ux * t + vx * o, y: cy + uy * t + vy * o }; };
+    var info = st.map(function (q) { return { q: q, t: (q.x - cx) * ux + (q.y - cy) * uy, o: (q.x - cx) * vx + (q.y - cy) * vy }; });
+    var t0 = Math.min.apply(null, info.map(function (i) { return i.t; })), t1 = Math.max.apply(null, info.map(function (i) { return i.t; }));
+    var oMax = Math.max.apply(null, info.map(function (i) { return i.o; })), oMin = Math.min.apply(null, info.map(function (i) { return i.o; }));
+    // every station on the outward leg; the return leg runs parallel, one loop-width away,
+    // with a straight run past the end stations and a half-circle turn at each end
+    var w = Math.max(minR * 3.4, (t1 - t0) * 0.15, 25), lead = Math.max(minR * 0.8, 10);
+    var ord = info.slice().sort(function (a, b) { return a.t - b.t; }), oA = ord[0].o, oB = ord[ord.length - 1].o, down = oMin - w;
+    var P = [W(t0 - lead, oA)];
+    ord.forEach(function (i) { P.push({ s: i.q.id }); });
+    P.push(W(t1 + lead, oB));
+    // half-circle turns from each end station's line round to the return leg
+    var rB = (oB - down) / 2, mB = (oB + down) / 2, rA = (oA - down) / 2, mA = (oA + down) / 2;
+    [60, 30, 0, -30, -60].forEach(function (a) { a *= Math.PI / 180; P.push(W(t1 + lead + rB * Math.cos(a), mB + rB * Math.sin(a))); });
+    P.push(W(t1 + lead, down), W((t0 + t1) / 2, down), W(t0 - lead, down));
+    [-120, -150, 180, 150, 120].forEach(function (a) { a *= Math.PI / 180; P.push(W(t0 - lead + rA * Math.cos(a), mA + rA * Math.sin(a))); });
+    return P;
+  }
+  // which way the track runs through each station (so the station lines up with it)
+  function stationAngles(rd) {
+    var P = trackPts(rd), out = {};
+    P.forEach(function (q, i) {
+      if (!q.s) return;
+      var a = P[(i - 1 + P.length) % P.length], b = P[(i + 1) % P.length];
+      out[q.s] = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+    });
+    return out;
+  }
+  // keep a station off habitats, exhibits and staff areas
+  function clearStation(st, sp, circles) {
+    var sr = Math.sqrt(sp.w * sp.d / Math.PI);
+    for (var it = 0; it < 30; it++) {
+      var moved = false;
+      circles.forEach(function (c) {
+        if (c.type === 'station' || c.seed === st.id) return;
+        var dx = st.x - c.x, dy = st.y - c.y, d = Math.hypot(dx, dy) || 0.01, need = c.r + sr + 3;
+        if (d >= need) return;
+        st.x += dx / d * (need - d + 0.5); st.y += dy / d * (need - d + 0.5); moved = true;
+      });
+      if (!moved) break;
+    }
+  }
+  function zooCentre(LR) {
+    var cx = 0, cy = 0, w = 0;
+    if (LR && LR.R) LR.R.circles.forEach(function (c) { if (c.type !== 'station') { cx += c.x * c.A; cy += c.y * c.A; w += c.A; } });
+    return w ? { x: cx / w, y: cy / w } : { x: 0, y: 0 };
+  }
+  // the nearest path a station can join without cutting through an enclosure
+  function nearestPathNode(R, x, y) {
+    var nearest = null;
+    R.keptNodes.forEach(function (n) {
+      var nd = R.net.nodes[n], d = Math.hypot(nd.x - x, nd.y - y);
+      var blocked = R.circles.some(function (c) {
+        if (c.type === 'station' && Math.hypot(c.x - x, c.y - y) < 1) return false;
+        var vx = nd.x - x, vy = nd.y - y, l2 = vx * vx + vy * vy, u = l2 ? Math.max(0, Math.min(1, ((c.x - x) * vx + (c.y - y) * vy) / l2)) : 0;
+        return Math.hypot(x + u * vx - c.x, y + u * vy - c.y) < c.r * 0.85;
+      });
+      d += blocked ? 1e5 : 0;
+      if (!nearest || d < nearest.d) nearest = { d: d, n: nd };
+    });
+    return nearest ? nearest.n : null;
+  }
+  function addStation(choice) {
+    var p = plan();
+    if (!p.habitats.length && !p.exhibits.length) { toast('Add some animals first, then place ride stations'); return; }
+    var rd;
+    if (choice.indexOf('new:') === 0) {
+      var type = choice.slice(4), sp0 = rideSpecs[type], same = ridesOf(p).filter(function (r) { return r.type === type; });
+      var num = 1; while (same.some(function (r) { return r.num === num; })) num++;
+      var used = ridesOf(p).map(function (r) { return r.color; }), color = RIDE_COLORS.filter(function (c) { return used.indexOf(c) < 0; })[0] || RIDE_COLORS[ridesOf(p).length % RIDE_COLORS.length];
+      rd = { id: 'rd' + uid(), type: type, num: num, name: sp0.name + ' ' + num, color: color, stations: [], track: null };
+      ridesOf(p).push(rd);
+    } else rd = findRide(p, choice.slice(3));
+    if (!rd) return;
+    var Lm = toManual(p), LR = layoutCache.result, sp = rideSpecs[rd.type], r = Math.hypot(sp.w, sp.d) / 2;
+    var obstacles = LR && LR.R ? LR.R.circles.map(function (c) { return { x: c.x, y: c.y, r: c.r }; }) : [];
+    (LR && LR.R ? LR.R.plazas : []).forEach(function (q) { obstacles.push({ x: q.x, y: q.y, r: q.w * 0.7 }); });
+    var right = -Infinity, top = Infinity;
+    obstacles.forEach(function (o) { right = Math.max(right, o.x + o.r); top = Math.min(top, o.y - o.r); });
+    if (LR && LR.R) LR.R.ents.forEach(function (e) { right = Math.max(right, e.x + e.w); });
+    if (right === -Infinity) { right = 0; top = 0; }
+    var spot = { x: right + r + 25, y: top + r };
+    for (var k = 0; k < 60 && obstacles.some(function (o) { return Math.hypot(o.x - spot.x, o.y - spot.y) < o.r + r + 6; }); k++) spot.y += r * 2 + 6;
+    rd.stations.push({ id: 'sn' + uid(), x: spot.x, y: spot.y });
+    changed();
+    toast(rd.name + ' station added. Drag it into place, then click Link stations under the map');
+  }
+  function rideCode(rd) { return rideSpecs[rd.type].short + rd.num; }
+  function facilityOptions() {
+    var p = plan(), sel = $('add-facility');
+    if (!sel) return;
+    var html = '<option value="">Add a staff area, plaza or ride station…</option><option value="staff">Staff area</option><option value="plaza">Guest plaza</option><optgroup label="Ride station">';
+    ridesOf(p).forEach(function (rd) { html += '<option value="st:' + esc(rd.id) + '">Station for ' + esc(rd.name) + '</option>'; });
+    BUILT_RIDES.forEach(function (t) { html += '<option value="new:' + t + '">New ' + esc(rideSpecs[t].name.toLowerCase()) + '</option>'; });
+    sel.innerHTML = html + '</optgroup>';
+  }
+  // tapping the track, a bend point, or the open map while a ride is being edited
+  function tapTrack(rideId, i, at) {
+    var p = plan(), rd = findRide(p, rideId);
+    if (!rd || !rd.track) return;
+    if (editRide !== rideId) { editRide = rideId; delMode = false; render(); return; }
+    if (delMode) {
+      rd.track[i].g = true; delMode = false;
+      changed(); toast('Section deleted. Tap the map to redraw it, or tap a loose end to join it straight back');
+      return;
+    }
+    rd.track.splice(i + 1, 0, { x: at.x, y: at.y });
+    changed();
+  }
+  function tapBend(rideId, i) {
+    var p = plan(), rd = findRide(p, rideId);
+    if (!rd || !rd.track || !rd.track[i]) return;
+    var T = rd.track, n = T.length, prev = T[(i - 1 + n) % n];
+    if (T[i].g || prev.g) {
+      // a loose end: join the gap next to it
+      if (T[i].g) T[i].g = false; else prev.g = false;
+      changed(); toast('Gap joined'); return;
+    }
+    if (n <= 3) { toast('A loop needs at least 3 points'); return; }
+    dropPoint(rd, i);
+    changed();
+  }
+  function tapOpenMap(at) {
+    var p = plan(), rd = editRide && findRide(p, editRide);
+    if (!rd) return false;
+    var P = rd.track ? trackPts(rd) : [], n = P.length, best = null;
+    P.forEach(function (q, i) {
+      if (!q.g) return;
+      var b = P[(i + 1) % n], da = Math.hypot(q.x - at.x, q.y - at.y), db = Math.hypot(b.x - at.x, b.y - at.y);
+      if (!best || Math.min(da, db) < best.d) best = { i: i, d: Math.min(da, db), fromStart: da <= db };
+    });
+    if (!best) { editRide = null; delMode = false; render(); return true; } // nothing to draw: tapping away finishes editing
+    var T = rd.track;
+    if (best.fromStart) { T[best.i].g = false; T.splice(best.i + 1, 0, { x: at.x, y: at.y, g: true }); }
+    else T.splice(best.i + 1, 0, { x: at.x, y: at.y });
+    changed();
+    return true;
+  }
+  function ridesHtml(p) {
+    var list = ridesOf(p);
+    var html = '<div class="rides"><h3>Transport rides</h3>';
+    if (!list.length) return html + '<p class="muted small">To add a gondola or monorail, choose a new ride under <strong>Add to the map</strong> on the left. Add its stations, drag them into place, then link them into a loop.</p></div>';
+    list.forEach(function (rd) {
+      var sp = rideSpecs[rd.type], P = trackPts(rd), segs = trackGeo(P, sp), editing = editRide === rd.id;
+      var onTrack = P.filter(function (q) { return q.s; }).length, ns = rd.stations.length;
+      html += '<div class="ride' + (editing ? ' editing' : '') + '"><div class="ride-head"><i style="background:' + rd.color + '"></i><b>' + esc(rd.name) + '</b><span class="muted small">' + ns + ' station' + (ns === 1 ? '' : 's') + '</span>' +
+        '<span class="ride-btns"><button type="button" class="secondary small" data-ride-act="link" data-ride="' + rd.id + '"' + (ns ? '' : ' disabled') + '>Link stations</button>' +
+        (segs.some(function (g) { return !g.gap && g.tight; }) ? '<button type="button" class="secondary small" data-ride-act="correct" data-ride="' + rd.id + '">Correct track</button>' : '') +
+        (rd.track ? '<button type="button" class="secondary small" data-ride-act="edit" data-ride="' + rd.id + '">' + (editing ? 'Done' : 'Edit track') + '</button>' : '') +
+        '<button type="button" class="secondary small danger" data-ride-act="remove" data-ride="' + rd.id + '">Remove ride</button></span></div>';
+      var notes = [];
+      if (!ns) notes.push('No stations yet. Add one from <strong>Add to the map</strong>.');
+      else if (!rd.track) notes.push('Not linked yet. Click <strong>Link stations</strong> to draw the loop.');
+      else {
+        if (onTrack < ns) notes.push((ns - onTrack) + ' station' + (ns - onTrack === 1 ? ' isn’t' : 's aren’t') + ' on the track yet. Click <strong>Link stations</strong> to redraw the loop through every station.');
+        if (segs.some(function (g) { return g.gap; })) notes.push('The track has a gap, so it isn’t a loop yet. Click <strong>Edit track</strong>, then tap the map to draw track from the nearest loose end, and tap the other loose end to join it.');
+        if (segs.some(function (g) { return !g.gap && g.tight; })) notes.push('Bends in red are too tight for a ' + esc(sp.name.toLowerCase()) + '. Click <strong>Correct track</strong> to smooth them.');
+      }
+      if (editing) {
+        html += '<p class="small ride-help">' + (delMode ? '<strong>Tap the stretch of track to delete.</strong>' :
+          'Drag the dots to reshape the track. Tap the track to add a dot; tap a dot to remove it. Tap an empty spot on the map when you’re done.') + '</p>' +
+          '<div class="row small"><button type="button" class="secondary small' + (delMode ? ' on' : '') + '" data-ride-act="delmode" data-ride="' + rd.id + '">' + (delMode ? 'Cancel delete' : 'Delete a section') + '</button></div>';
+      }
+      if (notes.length) html += '<div class="note bad small">' + notes.join('<br>') + '</div>';
+      html += '</div>';
+    });
+    return html + '</div>';
+  }
+  function rideAction(act, id) {
+    var p = plan(), rd = findRide(p, id);
+    if (!rd) return;
+    if (act === 'link') {
+      linkRide(rd, zooCentre(layoutCache.result));
+      changed();
+      var bad = trackGeo(trackPts(rd), rideSpecs[rd.type]).some(function (g) { return g.tight; });
+      toast(rd.name + ' linked' + (bad ? '. Some bends are too tight (shown in red)' : ''));
+    } else if (act === 'correct') {
+      var left = correctTrack(rd);
+      changed();
+      if (!left.length) toast(rd.name + ' track corrected');
+      else if (left.some(function (x) { return x.atStation; })) toast('Some bends right beside a station couldn’t be fixed. Try moving that station further from its neighbours, or adding a dot to give the track more room to turn');
+      else toast('Some bends couldn’t be smoothed without moving the track a lot. Try dragging the dots further apart');
+    } else if (act === 'edit') {
+      editRide = editRide === id ? null : id; delMode = false; render();
+    } else if (act === 'delmode') {
+      delMode = !delMode; render();
+    } else if (act === 'remove') {
+      if (!window.confirm('Remove ' + rd.name + ' and all its stations?')) return;
+      p.rides = ridesOf(p).filter(function (r) { return r.id !== id; });
+      if (editRide === id) editRide = null;
+      changed();
+    }
+  }
+
+  // ---------- HABITAT SHAPES ----------
+  // A stretched habitat keeps its outline as points around its centre (pos.shape).
+  // Its size is the area inside that outline, never below the habitat's minimum.
+  var shapeSel = null, shapeEdit = null;
+  function defaultShape(seed, r) {
+    // the same wobbly outline the map draws for an unstretched habitat
+    var rnd = rand(seedOf(seed + '|' + R_VARIANT)), n = 14, pts = [], ph = rnd() * 6.28;
+    var a1 = 0.06 + rnd() * 0.06, a2 = 0.04 + rnd() * 0.05, k1 = 2 + Math.floor(rnd() * 2);
+    for (var i = 0; i < n; i++) {
+      var t = i / n * Math.PI * 2, rr = r * (1 + a1 * Math.sin(k1 * t + ph) + a2 * Math.sin((k1 + 2) * t + ph * 1.7) + (rnd() - 0.5) * 0.05);
+      pts.push({ x: rr * Math.cos(t), y: rr * Math.sin(t) });
+    }
+    return pts;
+  }
+  function outlineSamples(pts, per) {
+    var out = [];
+    for (var i = 0; i < pts.length; i++) { var b = segBez(pts, i); for (var k = 0; k < per; k++) out.push(bezAt(b, k / per)); }
+    return out;
+  }
+  function polyArea(q) { var a = 0; for (var i = 0; i < q.length; i++) { var u = q[i], v = q[(i + 1) % q.length]; a += u.x * v.y - v.x * u.y; } return Math.abs(a) / 2; }
+  function shapeArea(pts) { return polyArea(outlineSamples(pts, 8)); }
+  function scaleShape(pts, A) { var a = shapeArea(pts), k = a > 0 ? Math.sqrt(A / a) : 1; return pts.map(function (q) { return { x: q.x * k, y: q.y * k }; }); }
+  // the outline as a drawing, optionally grown outward (for the greenery round it)
+  function outlineD(cx, cy, pts, grow) {
+    var P = pts.map(function (q) { var l = Math.hypot(q.x, q.y) || 1, k = 1 + (grow || 0) / l; return { x: cx + q.x * k, y: cy + q.y * k }; });
+    var d = 'M' + f1(P[0].x) + ' ' + f1(P[0].y);
+    for (var i = 0; i < P.length; i++) { var b = segBez(P, i); d += 'C' + f1(b[1].x) + ' ' + f1(b[1].y) + ',' + f1(b[2].x) + ' ' + f1(b[2].y) + ',' + f1(b[3].x) + ' ' + f1(b[3].y); }
+    return d + 'Z';
+  }
+  // round pieces that fill a stretched outline, so paths, plazas and everything else go round its real shape
+  function shapeParts(cx, cy, pts) {
+    var sm = outlineSamples(pts, 4).map(function (q) { return { x: cx + q.x, y: cy + q.y }; });
+    var rin = Math.min.apply(null, sm.map(function (q) { return Math.hypot(q.x - cx, q.y - cy); })) * 0.95, parts = [];
+    sm.forEach(function (q) {
+      var d = Math.hypot(q.x - cx, q.y - cy);
+      if (d - rin < 3) return;
+      var rp = Math.max(4, Math.min(18, (d - rin) / 2 + 3)), x = q.x + (cx - q.x) / d * rp, y = q.y + (cy - q.y) / d * rp;
+      if (parts.some(function (o) { return Math.hypot(o.x - x, o.y - y) < Math.min(o.r, rp) * 0.6; })) return;
+      parts.push({ x: x, y: y, r: rp });
+    });
+    return { rin: Math.max(rin, 4), parts: parts };
+  }
+  function hasShapes(p) { var pos = p.layout && p.layout.pos; return !!pos && Object.keys(pos).some(function (k) { return pos[k] && pos[k].shape; }); }
+  // what a fresh layout would throw away, for the warning
+  function lostOnRedraw(p) {
+    var w = [];
+    if (hasStations(p)) w.push('your transport rides');
+    if (hasShapes(p)) w.push('your habitat shapes');
+    return w.join(' and ');
+  }
+  function stretchPoint(seed, k, dx, dy) {
+    var p = plan(), LR = layoutCache.result, c = LR && LR.R.circles.filter(function (o) { return o.seed === seed; })[0];
+    if (!c || !c.unit) return;
+    var Lm = toManual(p), pos = Lm.pos[seed];
+    if (!pos) return;
+    var pts = (pos.shape || defaultShape(seed, Math.sqrt(c.A / Math.PI))).map(function (q) { return { x: q.x, y: q.y }; });
+    var o = { x: pts[k].x, y: pts[k].y }, minA = c.unit.base;
+    pts[k] = { x: o.x + dx, y: o.y + dy };
+    if (shapeArea(pts) < minA) {
+      // stop the drag at the habitat's minimum size
+      var lo = 0, hi = 1;
+      for (var it = 0; it < 24; it++) { var m = (lo + hi) / 2; pts[k] = { x: o.x + dx * m, y: o.y + dy * m }; if (shapeArea(pts) >= minA) lo = m; else hi = m; }
+      pts[k] = { x: o.x + dx * lo, y: o.y + dy * lo };
+      if (shapeArea(pts) < minA) pts = scaleShape(pts, minA);
+      toast('That’s the minimum size for this habitat (' + fmt(minA) + ' m²)');
+    }
+    pos.shape = pts;
+    c.unit.h.size = Math.max(Math.ceil(minA), Math.round(shapeArea(pts)));
+    makeRoom(Lm, seed, pos);
+    changed();
+  }
+  function shapeAction(act) {
+    var p = plan(), pos = p.layout && p.layout.pos && p.layout.pos[shapeSel];
+    if (act === 'done') { shapeSel = null; render(); return; }
+    if (act === 'reset' && pos && pos.shape) { delete pos.shape; changed(); toast('Shape reset. The habitat keeps its size'); }
+  }
+
+  // ---------- CORRECT TRACK ----------
+  // Smooth only the bend points round each too-tight bend, a little at a time, until
+  // nothing is red. Stations never move. Returns how many tight bends are left.
+  function correctTrack(rd) {
+    var sp = rideSpecs[rd.type], minR = minRadius(sp);
+    if (!rd.track) return [];
+    function badness() { return trackGeo(trackPts(rd), sp).reduce(function (s, g) { return s + (g.tight && !g.gap ? minR - Math.min(g.rmin, minR) + 1 : 0); }, 0); }
+    var start = { bad: badness(), track: JSON.parse(JSON.stringify(rd.track)) };
+    if (start.bad > 0) {
+      // first: run the track straight through any station with a tight bend beside it
+      var P0 = trackPts(rd), n0 = P0.length, geo0 = trackGeo(P0, sp), locked = {};
+      P0.forEach(function (q, i) {
+        if (!q.s) return;
+        var ip = (i - 1 + n0) % n0, inx = (i + 1) % n0;
+        if (![(i - 2 + n0) % n0, ip, i, inx].some(function (k) { return geo0[k].tight && !geo0[k].gap; })) return;
+        if (rd.track[ip].s || rd.track[inx].s) return;
+        var a = P0[ip], b = P0[inx], ux = b.x - a.x, uy = b.y - a.y, ul = Math.hypot(ux, uy) || 1;
+        ux /= ul; uy /= ul;
+        var d = Math.max(minR, Math.min(Math.hypot(a.x - q.x, a.y - q.y), Math.hypot(b.x - q.x, b.y - q.y)));
+        rd.track[ip] = Object.assign({}, rd.track[ip], { x: q.x - ux * d, y: q.y - uy * d });
+        rd.track[inx] = Object.assign({}, rd.track[inx], { x: q.x + ux * d, y: q.y + uy * d });
+        locked[ip] = locked[inx] = true;
+      });
+      // then: nudge only the bend points round each tight bend, a little at a time, in whichever
+      // direction makes the bend gentler (stations never move)
+      var T = rd.track, n = T.length, orig = T.map(function (q) { return { x: q.x, y: q.y }; });
+      var P = trackPts(rd);
+      var segBad = function (i) {
+        i = (i + n) % n;
+        if (P[i].g) return 0;
+        var b = segBez(P, i), r = Infinity;
+        for (var k = 0; k <= 16; k++) r = Math.min(r, bezRadius(b, k / 16));
+        return r < minR * 0.97 ? minR - Math.min(r, minR) + 1 : 0;
+      };
+      var local = function (k) { return segBad(k - 2) + segBad(k - 1) + segBad(k) + segBad(k + 1); };
+      var dirs = [];
+      for (var a8 = 0; a8 < 8; a8++) dirs.push({ x: Math.cos(a8 * Math.PI / 4), y: Math.sin(a8 * Math.PI / 4) });
+      for (var step = Math.max(2, minR / 4), guard = 0; step >= 0.5 && guard < 300; guard++) {
+        var near = {}, any = false;
+        for (var i = 0; i < n; i++) if (segBad(i)) { any = true; [-1, 0, 1, 2].forEach(function (d) { near[(i + d + n) % n] = true; }); }
+        if (!any) break;
+        var improved = false;
+        Object.keys(near).forEach(function (kk) {
+          var k = Number(kk);
+          if (T[k].s) return;
+          var base = local(k), q0 = { x: P[k].x, y: P[k].y }, bestMove = null;
+          dirs.forEach(function (d) {
+            P[k].x = q0.x + d.x * step; P[k].y = q0.y + d.y * step;
+            var v = local(k) + 0.001 * Math.hypot(P[k].x - orig[k].x, P[k].y - orig[k].y);
+            if (v < base - 1e-3 && (!bestMove || v < bestMove.v)) bestMove = { v: v, x: P[k].x, y: P[k].y };
+          });
+          if (bestMove) { P[k].x = bestMove.x; P[k].y = bestMove.y; improved = true; } else { P[k].x = q0.x; P[k].y = q0.y; }
+        });
+        if (!improved) step /= 2;
+      }
+      rd.track = T.map(function (q, i) { return q.s ? q : Object.assign({}, q, { x: P[i].x, y: P[i].y }); });
+      if (badness() > start.bad) rd.track = start.track;
+    }
+    var P1 = trackPts(rd), n1 = P1.length;
+    return trackGeo(P1, sp).filter(function (g) { return g.tight && !g.gap; }).map(function (g) { return { atStation: !!(P1[g.i].s || P1[(g.i + 1) % n1].s) }; });
   }
 
   // ---------- drawing ----------
@@ -1159,27 +1703,42 @@
   function mapHtml(units, themeNames) {
     var p = plan(), LR = computeLayout(units, themeNames, p), R = LR.R, S = LR.S, bb = LR.bb;
     var free = true;
+    if (editRide && !findRide(p, editRide)) { editRide = null; delMode = false; }
+    // ride tracks (worked out first so the map can be made big enough for them)
+    var tracks = ridesOf(p).map(function (rd) { var P = trackPts(rd); return { rd: rd, sp: rideSpecs[rd.type], P: P, segs: trackGeo(P, rideSpecs[rd.type]), ang: stationAngles(rd) }; });
+    tracks.forEach(function (t) {
+      t.segs.forEach(function (g) {
+        [g.b[0], g.b[1], g.b[2], g.b[3]].forEach(function (q) {
+          var x0 = Math.min(bb.x, q.x - 12), y0 = Math.min(bb.y, q.y - 12), x1 = Math.max(bb.x + bb.w, q.x + 12), y1 = Math.max(bb.y + bb.h, q.y + 12);
+          bb = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+        });
+      });
+    });
     var pad = 10, vb = [bb.x - pad, bb.y - pad, bb.w + 2 * pad, bb.h + 2 * pad + 20];
     var colorOf = {};
     themeNames.forEach(function (t, i) { colorOf[t] = THEME_COLORS[i % THEME_COLORS.length]; });
     var svg = '<svg class="zoo-map" viewBox="' + vb.map(f1).join(' ') + '" role="img" aria-label="Layout concept for ' + esc(p.name) + '" xmlns="http://www.w3.org/2000/svg">';
     svg += '<rect x="' + f1(vb[0]) + '" y="' + f1(vb[1]) + '" width="' + f1(vb[2]) + '" height="' + f1(vb[3]) + '" fill="#f7f3ea"/>';
     function shape(c, grow, fill, extraAttr) {
+      if (c.shape) return '<path d="' + outlineD(c.x, c.y, c.shape, grow) + '" fill="' + fill + '"' + (extraAttr || '') + '/>';
       if (free) return '<path d="' + blob({ x: c.x, y: c.y, r: c.r + grow, seed: c.seed }, 1) + '" fill="' + fill + '"' + (extraAttr || '') + '/>';
       var s = Math.sqrt(Math.PI) * (c.r + grow);
       return '<rect x="' + f1(c.x - s / 2) + '" y="' + f1(c.y - s / 2) + '" width="' + f1(s) + '" height="' + f1(s) + '" rx="' + f1(Math.min(6, s / 6)) + '" fill="' + fill + '"' + (extraAttr || '') + '/>';
     }
     // the zoo grounds, then soft theme areas
-    R.circles.forEach(function (c) { svg += shape(c, 16, ZOO_GREEN); });
+    R.circles.forEach(function (c) { if (c.type !== 'part') svg += shape(c, 16, ZOO_GREEN); });
     R.circles.forEach(function (c) { if (c.theme) svg += shape(c, 9, colorOf[c.theme], ' fill-opacity="0.28"'); });
     // paths
     var lines = chains(R.net, R.kept);
     R.ents.forEach(function (e) { if (e.link) lines.push([[e.cx, e.cy], [e.link.x, e.link.y]]); });
+    // every ride station gets a short path to the nearest path
+    R.circles.forEach(function (c) { if (c.type !== 'station') return; var nd = nearestPathNode(R, c.x, c.y); if (nd) lines.push([[c.x, c.y], [nd.x, nd.y]]); });
     lines.forEach(function (l) {
       var d = free ? smoothPath(l, false) : 'M' + l.map(function (q) { return f1(q[0]) + ' ' + f1(q[1]); }).join('L');
       svg += '<path d="' + d + '" fill="none" stroke="#d9c79e" stroke-width="' + S.P + '" stroke-linecap="round" stroke-linejoin="round"/>';
     });
     function label(c, txt, col) {
+      if (c.shape) c = { x: c.x, y: c.y, r: Math.max(c.r, Math.sqrt(c.A / Math.PI) * 0.55), short: c.short };
       var w = c.r * 1.5, fs = Math.max(2.6, Math.min(9, c.r * 0.38));
       var t = txt && txt.length * fs * 0.55 <= w ? txt : (c.short && c.short.length * fs * 0.6 <= w ? c.short : '');
       return t ? '<text x="' + f1(c.x) + '" y="' + f1(c.y) + '" font-size="' + f1(fs) + '" fill="' + col + '" text-anchor="middle" dominant-baseline="central">' + esc(t) + '</text>' : '';
@@ -1192,10 +1751,11 @@
         '<text x="' + f1(c.x) + '" y="' + f1(c.y) + '" font-size="' + f1(Math.min(6.5, w / 4.5)) + '" fill="' + col + '" text-anchor="middle" dominant-baseline="central">' + txt + '</text>';
     }
     R.circles.forEach(function (c) {
-      var g = '<g class="drag" data-drag="c|' + esc(c.seed) + '"><title>' + esc(c.title || '') + (c.type === 'staff' ? ' (drag to move, tap to remove)' : ' (drag to move)') + '</title>';
-      if (c.type === 'habitat') g += shape(c, 0, colorOf[c.theme], ' stroke="#4f5f47" stroke-width="0.9"') + label(c, c.short, '#1f2b1c');
+      if (c.type === 'station' || c.type === 'part') return;
+      var g = '<g class="drag" data-drag="c|' + esc(c.seed) + '"><title>' + esc(c.title || '') + (c.type === 'staff' ? ' (drag to move, tap to remove)' : c.type === 'habitat' || c.type === 'aquarium' ? ' (drag to move, tap to change its shape)' : ' (drag to move)') + '</title>';
+      if (c.type === 'habitat') g += shape(c, 0, colorOf[c.theme], ' stroke="#4f5f47" stroke-width="0.9" data-shape="' + esc(c.seed) + '"') + label(c, c.short, '#1f2b1c');
       else if (c.type === 'aquarium') {
-        g += shape(c, 0, '#9ccbe3', ' stroke="#2f6680" stroke-width="1.1"');
+        g += shape(c, 0, '#9ccbe3', ' stroke="#2f6680" stroke-width="1.1" data-shape="' + esc(c.seed) + '"');
         if (c.r > c.D) g += '<line x1="' + f1(c.x - c.r * 0.8) + '" y1="' + f1(c.y) + '" x2="' + f1(c.x + c.r * 0.8) + '" y2="' + f1(c.y) + '" stroke="#d9c79e" stroke-width="' + S.P + '" stroke-linecap="round"/>';
         g += label(c, c.short, '#123445');
       }
@@ -1207,8 +1767,55 @@
     R.plazas.forEach(function (pz, i) {
       svg += '<g class="drag" data-drag="p|' + esc(pz.id || ('auto' + i)) + '"><title>Guest plaza: 2 food, 2 drink, gift shop, toilet (drag to move' + (pz.mine ? ', tap to remove' : '') + ')</title>' + box(pz, S.plazaW, S.plazaD, '#f0b46a', '#b97a2e', 'Plaza', '#4a2f0c') + '</g>';
     });
+    // ride tracks go over everything (gondolas and monorails run overhead)
+    tracks.forEach(function (t) {
+      var col = t.rd.color, editing = editRide === t.rd.id;
+      t.segs.forEach(function (g) {
+        if (g.gap) return;
+        svg += '<path d="' + g.d + '" fill="none" stroke="' + (g.tight ? TIGHT_COLOR : col) + '" stroke-width="' + f1(t.sp.track + (editing ? 1 : 0)) + '" stroke-linecap="round"/>' +
+          '<path d="' + g.d + '" fill="none" stroke="#fff" stroke-opacity="0.85" stroke-width="0.7" stroke-dasharray="3 3"/>';
+      });
+      // wide invisible strokes, so the track is easy to tap
+      t.segs.forEach(function (g) {
+        if (g.gap) return;
+        svg += '<path class="trk" data-trk="' + esc(t.rd.id) + '|' + g.i + '" d="' + g.d + '" fill="none" stroke="transparent" stroke-width="7"><title>' + esc(t.rd.name) + (editing ? (delMode ? ' (tap to delete this section)' : ' (tap to add a bend point)') : ' (tap to edit the track)') + '</title></path>';
+      });
+    });
+    R.circles.forEach(function (c) {
+      if (c.type !== 'station') return;
+      var rd = c.ride, t = tracks.filter(function (x) { return x.rd === rd; })[0], ang = t && t.ang[c.seed] !== undefined ? t.ang[c.seed] : 0;
+      svg += '<g class="drag" data-drag="c|' + esc(c.seed) + '"><title>' + esc(rd.name) + ' station (drag to move, tap to remove)</title>' +
+        '<rect x="' + f1(c.x - c.w / 2) + '" y="' + f1(c.y - c.d / 2) + '" width="' + f1(c.w) + '" height="' + f1(c.d) + '" rx="1.5" fill="' + rd.color + '" stroke="#fff" stroke-width="0.9" transform="rotate(' + f1(ang) + ' ' + f1(c.x) + ' ' + f1(c.y) + ')"/>' +
+        '<text x="' + f1(c.x) + '" y="' + f1(c.y) + '" font-size="' + f1(Math.max(3, Math.min(6, Math.min(c.w, c.d) / 2.2))) + '" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="central">' + esc(rideCode(rd)) + '</text></g>';
+    });
+    // bend points of the track being edited
+    tracks.forEach(function (t) {
+      if (editRide !== t.rd.id) return;
+      var n = t.P.length;
+      t.P.forEach(function (q, i) {
+        if (q.s) return;
+        var loose = q.g || t.P[(i - 1 + n) % n].g;
+        svg += '<g class="drag bend" data-drag="b|' + esc(t.rd.id) + '|' + i + '"><title>' + (loose ? 'Loose end (drag to move, tap to join the gap)' : 'Bend point (drag to move, tap to remove)') + '</title>' +
+          '<circle cx="' + f1(q.x) + '" cy="' + f1(q.y) + '" r="' + (loose ? 4.6 : 3.2) + '" fill="' + (loose ? t.rd.color : '#fff') + '" stroke="' + (loose ? '#fff' : t.rd.color) + '" stroke-width="1.4"/></g>';
+      });
+    });
+    // stretch points of the habitat being reshaped
+    var sc = shapeSel && R.circles.filter(function (c) { return c.seed === shapeSel && (c.type === 'habitat' || c.type === 'aquarium'); })[0];
+    if (shapeSel && !sc) shapeSel = null;
+    shapeEdit = null;
+    var shapeSvg = '';
+    if (sc) {
+      var spts = sc.shape || defaultShape(sc.seed, Math.sqrt(sc.A / Math.PI));
+      shapeEdit = { seed: sc.seed, cx: sc.x, cy: sc.y, pts: spts, min: sc.unit.base };
+      shapeSvg += '<path d="' + outlineD(sc.x, sc.y, spts, 0) + '" fill="none" stroke="#1f2b1c" stroke-width="0.9" stroke-dasharray="2.5 2" pointer-events="none"/>';
+      spts.forEach(function (q, k) {
+        shapeSvg += '<g class="drag shape-pt" data-drag="s|' + esc(sc.seed) + '|' + k + '"><title>Stretch point (drag to change the shape)</title><circle cx="' + f1(sc.x + q.x) + '" cy="' + f1(sc.y + q.y) + '" r="3.6" fill="#fff" stroke="#1f2b1c" stroke-width="1.3"/></g>';
+      });
+    }
     // theme names, placed where they don't cover staff areas, plazas, entrances or other names
     var avoid = [];
+    tracks.forEach(function (t) { t.segs.forEach(function (g) { for (var k = 0; k <= 4; k++) { var q = bezAt(g.b, k / 4); avoid.push({ x: q.x - 4, y: q.y - 4, w: 8, h: 8, k: 4 }); } }); });
+    R.circles.forEach(function (c) { if (c.type === 'station') avoid.push({ x: c.x - c.w / 2, y: c.y - c.d / 2, w: c.w, h: c.d, k: 8 }); });
     R.circles.forEach(function (c) { if (c.type === 'staff') avoid.push({ x: c.x - S.staffW / 2, y: c.y - S.staffD / 2, w: S.staffW, h: S.staffD, k: 8 }); });
     R.plazas.forEach(function (pz) { avoid.push({ x: pz.x - S.plazaW / 2, y: pz.y - S.plazaD / 2, w: S.plazaW, h: S.plazaD, k: 8 }); });
     R.ents.forEach(function (e) { avoid.push({ x: e.x, y: e.y, w: e.w, h: e.d, k: 8 }); });
@@ -1225,6 +1832,7 @@
         var a = k / 24 * Math.PI * 2;
         [0.5, 0.75, 0.95, 1.1].forEach(function (fr) {
           var x = cl.x + Math.cos(a) * cl.r * fr, y = cl.y + Math.sin(a) * cl.r * fr;
+          x = Math.max(vb[0] + tw / 2 + 2, Math.min(vb[0] + vb[2] - tw / 2 - 2, x)); y = Math.max(vb[1] + th, Math.min(vb[1] + vb[3] - th, y)); // keep names on the map
           var rb = { x: x - tw / 2, y: y - th / 2, w: tw, h: th }, score = 0;
           avoid.forEach(function (o) { score += overlap(rb, o) * o.k; });
           score += Math.abs(Math.sin(a) + 1) * 2; // slight preference for the top
@@ -1238,6 +1846,7 @@
       svg += '<g class="drag" data-drag="e|' + i + '"><title>Entrance ' + (i + 1) + ' (drag to move)</title><rect x="' + f1(e.x) + '" y="' + f1(e.y) + '" width="' + f1(e.w) + '" height="' + f1(e.d) + '" rx="4" fill="#3d6a47"/>' +
         '<text x="' + f1(e.cx) + '" y="' + f1(e.cy) + '" font-size="6.5" fill="#fff" text-anchor="middle" dominant-baseline="central">Entrance</text></g>';
     });
+    svg += shapeSvg;
     var sx = vb[0] + pad, sy = vb[1] + vb[3] - 9;
     svg += '<rect x="' + f1(sx) + '" y="' + f1(sy - 1.5) + '" width="50" height="3" fill="#22301f"/><text x="' + f1(sx + 55) + '" y="' + f1(sy) + '" font-size="7" fill="#22301f" dominant-baseline="central">50 m</text>';
     svg += '</svg>';
@@ -1245,12 +1854,20 @@
     var area = bb.w * bb.h, mapA = S.map * S.map;
     var html = '<section class="card map-card"><div class="map-head"><h2>Layout concept</h2><span class="sub">about ' + fmt(bb.w) + ' × ' + fmt(bb.h) + ' m · ' + (Math.round(area / mapA * 1000) / 10) + '% of the map</span><span class="map-tools"><button type="button" class="secondary icon" id="undo" title="Undo" aria-label="Undo"' + (undoStack.length ? '' : ' disabled') + '>&#8630;</button><button type="button" class="secondary icon" id="redo" title="Redo" aria-label="Redo"' + (redoStack.length ? '' : ' disabled') + '>&#8631;</button><button type="button" class="secondary" id="regen">Regenerate plan</button></span></div>';
     html += '<div class="map-wrap">' + svg + '</div>';
+    if (sc) {
+      var su = sc.unit;
+      html += '<div class="shape-bar"><span><b>' + (su.aquarium ? 'Aquarium ' : 'Habitat ') + su.num + '</b>: drag the white dots to change its shape. <b id="shape-area">' + fmt(su.area) + ' m²</b> <span class="muted">(minimum ' + fmt(su.base) + ' m²)</span></span>' +
+        '<span class="ride-btns">' + (sc.shape ? '<button type="button" class="secondary small" data-shape-act="reset">Reset shape</button>' : '') + '<button type="button" class="secondary small" data-shape-act="done">Done</button></span></div>';
+    }
     var legend = themeNames.map(function (t) { return '<span class="lg"><i style="background:' + colorOf[t] + '"></i>' + esc(t) + '</span>'; }).join('') +
       (R.circles.some(function (c) { return c.type === 'aquarium'; }) ? '<span class="lg"><i style="background:#9ccbe3;border-color:#2f6680"></i>Aquarium</span>' : '') +
       '<span class="lg"><i style="background:#f0b46a"></i>Plaza</span><span class="lg"><i style="background:#9b8db3"></i>Staff area</span>' +
       '<span class="lg"><i style="background:#3d6a47"></i>Entrance</span><span class="lg"><i style="background:#d9c79e"></i>Path</span>';
     var nPl = R.plazas.length, nSt = R.circles.filter(function (c) { return c.type === 'staff'; }).length;
+    ridesOf(p).forEach(function (rd) { legend += '<span class="lg"><i style="background:' + rd.color + '"></i>' + esc(rd.name) + '</span>'; });
+    if (tracks.some(function (t) { return t.segs.some(function (g) { return g.tight && !g.gap; }); })) legend += '<span class="lg"><i style="background:' + TIGHT_COLOR + '"></i>Bend too tight</span>';
     html += '<div class="legend">' + legend + '</div>';
+    html += ridesHtml(p);
     // key: what's in each numbered enclosure, by theme
     var key = '<div class="map-key">';
     themeNames.forEach(function (t) {
@@ -1267,7 +1884,7 @@
     });
     html += key + '</div>';
     html += '<p class="small muted map-note">' + nPl + ' plaza' + (nPl === 1 ? '' : 's') + ', ' + nSt + ' staff area' + (nSt === 1 ? '' : 's') + ', ' +
-      LR.nEnt + ' entrance' + (LR.nEnt === 1 ? '' : 's') + (LR.auto ? ' (suggested)' : '') + '. Numbers match the habitat list below. Hover over or tap a shape for details.</p>';
+      LR.nEnt + ' entrance' + (LR.nEnt === 1 ? '' : 's') + (LR.auto ? ' (suggested)' : '') + '. Numbers match the habitat list below. Hover over a shape for details, or tap a habitat to change its shape.</p>';
     if (LR.issues.length) html += '<div class="note bad">' + LR.issues.map(esc).join('<br>') + '</div>';
     return html + '</section>';
   }
@@ -1275,6 +1892,7 @@
   function render() {
     var p = plan();
     renderPlanBar();
+    facilityOptions();
     var units = buildUnits();
     var panel = $('panel'), html = '';
     if (!storageOk) html += '<div class="card note bad">This browser isn’t letting the page save. Download a backup before closing the page.</div>';
@@ -1316,8 +1934,15 @@
     if (!svg) return;
     var drag = null;
     function pt(e) { var q = svg.createSVGPoint(); q.x = e.clientX; q.y = e.clientY; return q.matrixTransform(svg.getScreenCTM().inverse()); }
+    var tap = null;
     svg.addEventListener('pointerdown', function (e) {
       var g = e.target.closest('.drag');
+      if (!g && !drag) {
+        // not something to drag: remember it in case it's a tap on a ride track or the open map
+        var trk = e.target.closest('.trk');
+        tap = { x: e.clientX, y: e.clientY, id: e.pointerId, trk: trk ? trk.getAttribute('data-trk') : null };
+        return;
+      }
       if (!g || drag) return;
       e.preventDefault();
       try { g.setPointerCapture(e.pointerId); } catch (err) {}
@@ -1331,21 +1956,46 @@
       var q = pt(e);
       drag.dx = q.x - drag.x0; drag.dy = q.y - drag.y0;
       drag.g.setAttribute('transform', 'translate(' + drag.dx.toFixed(1) + ' ' + drag.dy.toFixed(1) + ')');
+      var dp = drag.g.getAttribute('data-drag').split('|');
+      if (dp[0] === 's' && shapeEdit && shapeEdit.seed === dp[1]) {
+        var pts2 = shapeEdit.pts.map(function (q) { return { x: q.x, y: q.y }; }), k = Number(dp[2]);
+        pts2[k] = { x: pts2[k].x + drag.dx, y: pts2[k].y + drag.dy };
+        var el = svg.querySelector('[data-shape="' + dp[1] + '"]'), a = shapeArea(pts2), lab = document.getElementById('shape-area');
+        if (el) el.setAttribute('d', outlineD(shapeEdit.cx, shapeEdit.cy, pts2, 0));
+        if (lab) { lab.textContent = fmt(Math.max(a, shapeEdit.min)) + ' m²'; lab.style.color = a < shapeEdit.min ? 'var(--bad)' : ''; }
+      }
     });
     function end(e) {
+      if (tap && e.pointerId === tap.id) {
+        var tp = tap; tap = null;
+        if (Math.hypot(e.clientX - tp.x, e.clientY - tp.y) >= 4) return;
+        var at = pt(e);
+        if (tp.trk) { var tk = tp.trk.split('|'); tapTrack(tk[0], Number(tk[1]), at); }
+        else if (editRide) tapOpenMap(at);
+        else if (shapeSel) { shapeSel = null; render(); }
+        return;
+      }
       if (!drag || e.pointerId !== drag.id) return;
       var d = drag, parts = d.g.getAttribute('data-drag').split('|');
       drag = null;
       d.g.classList.remove('dragging');
-      if (Math.hypot(e.clientX - d.px, e.clientY - d.py) < 4) { d.g.removeAttribute('transform'); tapItem(parts); return; }
+      if (Math.hypot(e.clientX - d.px, e.clientY - d.py) < 4) { d.g.removeAttribute('transform'); tapItem(parts, pt(e)); return; }
       moveItem(parts, d.dx, d.dy);
     }
     svg.addEventListener('pointerup', end);
     svg.addEventListener('pointercancel', function () { if (drag) { drag.g.removeAttribute('transform'); drag.g.classList.remove('dragging'); drag = null; } });
   }
   function moveItem(parts, dx, dy) {
+    if (parts[0] === 's') { stretchPoint(parts[1], Number(parts[2]), dx, dy); return; }
     var Lm = toManual(plan()), kind = parts[0], id = parts[1], LR = layoutCache.result;
-    if (kind === 'c') {
+    var stn = kind === 'c' && findStation(plan(), id);
+    if (stn) {
+      stn.st.x += dx; stn.st.y += dy;
+      if (LR && LR.R) clearStation(stn.st, rideSpecs[stn.ride.type], LR.R.circles);
+    } else if (kind === 'b') {
+      var rdb = findRide(plan(), id), q = rdb && rdb.track && rdb.track[Number(parts[2])];
+      if (q && !q.s) { q.x += dx; q.y += dy; }
+    } else if (kind === 'c') {
       var st = Lm.staff.filter(function (q) { return q.id === id; })[0];
       var it = st || Lm.pos[id];
       if (it) { it.x += dx; it.y += dy; makeRoom(Lm, id, it); }
@@ -1364,30 +2014,54 @@
   function makeRoom(Lm, movedId, movedPos) {
     var LR = layoutCache.result, S = L();
     if (!LR) return;
-    var gap = S.P + 4, items = [];
+    var gap = S.P + 4, items = [], bumped = [];
     LR.R.circles.forEach(function (c) {
-      var ref = c.type === 'staff' ? Lm.staff.filter(function (q) { return q.id === c.seed; })[0] : Lm.pos[c.seed];
-      if (ref) items.push({ id: c.seed, r: c.r, ref: ref, fixed: c.seed === movedId });
+      if (c.type === 'part') return;
+      var fs = c.type === 'station' && findStation(plan(), c.seed);
+      var ref = fs ? fs.st : c.type === 'staff' ? Lm.staff.filter(function (q) { return q.id === c.seed; })[0] : Lm.pos[c.seed];
+      if (!ref) return;
+      var fixed = c.seed === movedId;
+      if (ref.shape && (c.type === 'habitat' || c.type === 'aquarium')) {
+        var sp = shapeParts(0, 0, ref.shape);
+        items.push({ r: sp.rin, ref: ref, ox: 0, oy: 0, fixed: fixed });
+        sp.parts.forEach(function (q) { items.push({ r: q.r, ref: ref, ox: q.x, oy: q.y, fixed: fixed }); });
+      } else items.push({ r: c.r, ref: ref, ox: 0, oy: 0, fixed: fixed });
     });
     for (var round = 0; round < 30; round++) {
       var moved = false;
       items.forEach(function (a) {
+        // only the thing that was dropped, and whatever it then bumps, gets pushed
+        if (!a.fixed && bumped.indexOf(a.ref) < 0) return;
         items.forEach(function (b) {
-          if (a === b || b.fixed) return;
-          var dx = b.ref.x - a.ref.x, dy = b.ref.y - a.ref.y, d = Math.hypot(dx, dy) || 0.01, need = a.r + b.r + gap;
+          if (a.ref === b.ref || b.fixed) return;
+          var dx = (b.ref.x + b.ox) - (a.ref.x + a.ox), dy = (b.ref.y + b.oy) - (a.ref.y + a.oy), d = Math.hypot(dx, dy) || 0.01, need = a.r + b.r + gap;
           if (d >= need - 0.5) return;
-          // only the thing that was dropped, and whatever it then bumps, gets pushed
-          if (!a.fixed && !a.bumped) return;
           var push = need - d;
-          b.ref.x += dx / d * push; b.ref.y += dy / d * push; b.bumped = true; moved = true;
+          b.ref.x += dx / d * push; b.ref.y += dy / d * push; moved = true;
+          if (bumped.indexOf(b.ref) < 0) bumped.push(b.ref);
         });
       });
       if (!moved) break;
     }
   }
-  function tapItem(parts) {
+  function tapItem(parts, at) {
     var kind = parts[0], id = parts[1], LR = layoutCache.result;
     var isStaff = kind === 'c' && LR && LR.R.circles.some(function (c) { return c.seed === id && c.type === 'staff'; });
+    var stn = kind === 'c' && findStation(plan(), id);
+    if (kind === 'b') { tapBend(id, Number(parts[2])); return; }
+    var hab = kind === 'c' && LR && LR.R.circles.filter(function (c) { return c.seed === id && (c.type === 'habitat' || c.type === 'aquarium'); })[0];
+    // while redrawing a gap in a ride's track, taps on habitats place track (gondolas and monorails pass overhead)
+    var er = editRide && findRide(plan(), editRide);
+    if (hab && er && er.track && er.track.some(function (q) { return q.g; }) && at) { tapOpenMap(at); return; }
+    if (hab) { shapeSel = shapeSel === id ? null : id; editRide = null; delMode = false; render(); return; }
+    if (stn) {
+      if (!window.confirm('Remove this ' + stn.ride.name + ' station?')) return;
+      stn.ride.stations = stn.ride.stations.filter(function (q) { return q.id !== id; });
+      var ti = (stn.ride.track || []).map(function (q) { return q.s; }).indexOf(id);
+      if (ti >= 0) dropPoint(stn.ride, ti);
+      changed();
+      return;
+    }
     if (kind === 'p') {
       var Lm0 = plan().layout;
       var mine = Lm0 && Lm0.plazas.some(function (q) { return q.id === id; });
@@ -1589,14 +2263,21 @@
     $('plan-clear').addEventListener('click', function () {
       var p = plan();
       if (!p.habitats.length && !p.exhibits.length) return;
-      if (!window.confirm('Remove every habitat and exhibit from "' + p.name + '"? Your setup choices stay. This can’t be undone.')) return;
-      p.habitats = []; p.exhibits = []; p.setup.variant = 0; delete p.layout;
+      if (!window.confirm('Remove every habitat, exhibit and transport ride from "' + p.name + '"? Your setup choices stay.')) return;
+      p.habitats = []; p.exhibits = []; p.setup.variant = 0; delete p.layout; clearRides(p); shapeSel = null;
       changed(); toast('Zoo cleared');
     });
     $('panel').addEventListener('click', function (e) {
       if (e.target.closest('#undo')) return undoRedo(true);
       if (e.target.closest('#redo')) return undoRedo(false);
+      var rb = e.target.closest('button[data-ride-act]');
+      if (rb) return rideAction(rb.getAttribute('data-ride-act'), rb.getAttribute('data-ride'));
+      var sb = e.target.closest('button[data-shape-act]');
+      if (sb) return shapeAction(sb.getAttribute('data-shape-act'));
       if (!e.target.closest('#regen')) return;
+      var lost = lostOnRedraw(plan());
+      if (lost && !window.confirm('Regenerating the plan will clear ' + lost + '. Regenerate anyway?')) return;
+      clearRides(plan()); shapeSel = null;
       delete plan().layout;
       plan().setup.variant = (plan().setup.variant || 0) + 1;
       changed(); toast('New layout drawn');
@@ -1609,10 +2290,17 @@
     });
     $('set-theme').addEventListener('change', function () {
       // new themes mean a new arrangement
+      var lost = lostOnRedraw(plan());
+      if (lost && !window.confirm('Changing the themes redraws the map and will clear ' + lost + '. Change anyway?')) { this.value = plan().setup.theme; return; }
+      clearRides(plan()); shapeSel = null;
       if (plan().layout) toast('The map was redrawn for the new themes');
       plan().setup.theme = this.value; delete plan().layout; changed();
     });
-    $('add-facility').addEventListener('change', function () { var k = this.value; this.value = ''; if (k) addToMap(k); });
+    $('add-facility').addEventListener('change', function () {
+      var k = this.value; this.value = '';
+      if (!k) return;
+      if (k.indexOf('new:') === 0 || k.indexOf('st:') === 0) addStation(k); else addToMap(k);
+    });
     $('set-entrances').addEventListener('change', function () { plan().setup.entrances = this.value === 'auto' ? 'auto' : Number(this.value); changed(); });
 
   }
@@ -1740,6 +2428,18 @@
   // turn older single-butterfly walkthroughs into the multi-swarm kind.
   function cleanPlan(p) {
     var ok = function (m) { return model.animals[m.key]; };
+    var pos = p.layout && p.layout.pos;
+    if (pos) Object.keys(pos).forEach(function (k) {
+      var sh = pos[k] && pos[k].shape;
+      if (sh && !(Array.isArray(sh) && sh.length >= 5 && sh.every(function (q) { return q && isFinite(q.x) && isFinite(q.y); }))) delete pos[k].shape;
+    });
+    // rides only exist on a hand-arranged map; drop anything broken
+    p.rides = Array.isArray(p.rides) && p.layout && p.layout.manual ? p.rides.filter(function (rd) {
+      if (!rd || !rideSpecs[rd.type] || !Array.isArray(rd.stations)) return false;
+      rd.stations = rd.stations.filter(function (st) { return st && isFinite(st.x) && isFinite(st.y); });
+      if (rd.track && (!Array.isArray(rd.track) || rd.track.length < 3)) rd.track = null;
+      return true;
+    }) : [];
     p.habitats = (p.habitats || []).filter(function (h) { h.members = (h.members || []).filter(ok); return h.members.length; });
     p.exhibits = (p.exhibits || []).map(function (x) {
       if (!x.walk && x.key && model.animals[x.key] && isWalk(x.key)) return { id: x.id, walk: true, members: [{ key: x.key, n: 1 }], theme: x.theme || {} };
@@ -1756,6 +2456,7 @@
     model = PZ.buildModel(data);
     readSettings(data, warnings);
     readExtra(data, warnings);
+    readRides(data, warnings);
     exhibitAnimals = Object.keys(model.animals).map(function (k) { return model.animals[k]; })
       .filter(function (a) { return a.done && a.types.some(function (t) { return /exhibit|cylinder/i.test(t); }); })
       .sort(function (x, y) { return x.name.localeCompare(y.name); });
@@ -1786,7 +2487,7 @@
   function fail(msg) { $('panel').innerHTML = '<div class="card status">' + esc(msg) + ' Please try refreshing the page.</div>'; }
 
   if (!window.PZ_LOAD || !window.PZ) return fail('The animal data couldn’t be loaded.');
-  PZ_LOAD('habitat', ['Info', 'Basic Needs', 'Basic Items', 'Thrive Items', 'Terrain', 'Social Groups', 'Tooltips', 'Layout Settings'])
+  PZ_LOAD('habitat', ['Info', 'Basic Needs', 'Basic Items', 'Thrive Items', 'Terrain', 'Social Groups', 'Tooltips', 'Layout Settings', 'Rides'])
     .then(start, function () { fail('The animal data couldn’t be loaded.'); });
 })();
 </script>

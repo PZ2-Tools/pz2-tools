@@ -357,7 +357,7 @@ if (typeof document !== 'undefined') (function () {
     if (!z) z = { version: 1, current: null, plans: [] };
     if (choice === '__new' || !choice) {
       plan = { id: zooId(), name: z.plans.length ? 'Zoo plan ' + (z.plans.length + 1) : 'My zoo',
-        setup: { theme: 'continent', shape: 'grid', paths: 'theme-loops', entrances: 'auto' }, habitats: [], exhibits: [] };
+        setup: { theme: 'continent', shape: 'freeform', paths: 'theme-loops', entrances: 'auto' }, habitats: [], exhibits: [] };
       z.plans.push(plan);
     } else {
       plan = z.plans.filter(function (p) { return p.id === choice; })[0];

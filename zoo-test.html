@@ -108,6 +108,9 @@
   .legend .lg { display: inline-flex; align-items: center; gap: 6px; }
   .legend i { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,.18); display: inline-block; }
   .map-note { margin: 8px 0 0; }
+  .zoo-map .drag { cursor: grab; touch-action: none; }
+  .zoo-map .drag:hover > :first-of-type, .zoo-map .drag.dragging > :first-of-type { filter: brightness(1.06); }
+  .zoo-map .drag.dragging { cursor: grabbing; opacity: .85; }
   .map-key { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px 18px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
   .key-theme h3 { font-family: "DM Sans", sans-serif; font-size: 13px; font-weight: 700; margin: 0 0 4px; display: flex; align-items: center; gap: 6px; text-transform: uppercase; letter-spacing: .04em; }
   .key-theme h3 i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid rgba(0,0,0,.15); }
@@ -174,7 +177,10 @@
         <div class="row"><input type="text" id="add-exhibit" placeholder="Search animals…" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="suggest-exhibit"><button type="button" class="primary" id="add-exhibit-btn">Add</button></div>
         <div class="suggest" id="suggest-exhibit" role="listbox" aria-label="Matching exhibit animals"></div>
       </div>
-      <p class="muted small" style="margin:0">Habitats are sized for each animal's group size, with every thrive need met, plus extra space. Leave a group size blank to use the largest group allowed automatically (shown in grey).</p>
+      <label class="field"><span>Add to the map</span>
+        <select id="add-facility"><option value="">Add a staff area or plaza…</option><option value="staff">Staff area</option><option value="plaza">Guest plaza</option></select>
+      </label>
+      <p class="muted small" style="margin:0">Drag anything on the map to move it; the paths follow. Tap a staff area or plaza to remove it. Habitats are sized for each animal's group size, with every thrive need met, plus extra space. Leave a group size blank to use the largest group allowed automatically (shown in grey).</p>
     </section>
 
     <section class="card" aria-label="Backup">
@@ -817,7 +823,13 @@
     var byTheme = baseItems(units, themeNames);
     var packed = packAll(byTheme, themeNames, S, more, R_VARIANT), circles = packed.circles;
     rimStaff(circles, S);
-    var net = gapNetwork(circles, S), kept = choosePaths(net, circles, packed.clusters, style);
+    return finish(circles, packed.clusters, S, nEnt, null);
+  }
+  // Paths, staff check and entrances for enclosures that are already in place.
+  // (Used for the automatic layout and after the player moves things.)
+  function finish(circles, clusters, S, nEnt, givenEnts) {
+    var style = 'theme-loops';
+    var net = gapNetwork(circles, S), kept = choosePaths(net, circles, clusters, style);
     var keptIdx = Object.keys(kept).map(Number), problems = [];
     var keptNet = { nodes: net.nodes, edges: keptIdx.map(function (ei) { return net.edges[ei]; }) };
     keptNet.adj = net.nodes.map(function () { return []; });
@@ -846,6 +858,27 @@
     }
     // Entrances: start from the path nearest the edge in each direction and walk straight
     // out until clear of the zoo, so every entrance path is short and crosses nothing.
+    function linkTo(ex, ey) {
+      // the nearest path it can reach without cutting through an enclosure
+      var nearest = null;
+      keptNodes.forEach(function (n) {
+        var nx = net.nodes[n].x, ny = net.nodes[n].y, d = Math.hypot(nx - ex, ny - ey);
+        var blocked = circles.some(function (c) {
+          var vx = nx - ex, vy = ny - ey, l2 = vx * vx + vy * vy, u = l2 ? Math.max(0, Math.min(1, ((c.x - ex) * vx + (c.y - ey) * vy) / l2)) : 0;
+          return Math.hypot(ex + u * vx - c.x, ey + u * vy - c.y) < c.r * 0.85;
+        });
+        d += blocked ? 1e5 : 0;
+        if (!nearest || d < nearest.d) nearest = { d: d, n: n };
+      });
+      return nearest ? nearest.n : null;
+    }
+    if (givenEnts && givenEnts.length === nEnt) {
+      var placed = givenEnts.map(function (g, i) {
+        var n = linkTo(g.x, g.y);
+        return { id: 'e' + i, x: g.x - S.entW / 2, y: g.y - S.entD / 2, w: S.entW, d: S.entD, cx: g.x, cy: g.y, node: n, link: n !== null ? net.nodes[n] : null };
+      });
+      return { circles: circles, clusters: clusters, net: net, kept: kept, keptNet: keptNet, keptNodes: keptNodes, ents: placed, plazas: [], problems: problems };
+    }
     var ents = angles.map(function (ang, i) {
       var dx = Math.cos(ang), dy = Math.sin(ang), best = null;
       keptNodes.forEach(function (n) {
@@ -863,14 +896,15 @@
       if (!best) { best = { n: null, ex: cx - 200, ey: cy }; }
       return { id: 'e' + i, x: best.ex - S.entW / 2, y: best.ey - S.entD / 2, w: S.entW, d: S.entD, cx: best.ex, cy: best.ey, node: best.n, link: best.n !== null ? net.nodes[best.n] : null };
     });
-    var plazas = [];
-    return { circles: circles, clusters: packed.clusters, net: net, kept: kept, keptNet: keptNet, keptNodes: keptNodes, ents: ents, plazas: plazas, problems: problems };
+    return { circles: circles, clusters: clusters, net: net, kept: kept, keptNet: keptNet, keptNodes: keptNodes, ents: ents, plazas: [], problems: problems };
   }
   // Plazas on the paths: as few as possible so that every stretch of path is within
   // half the plaza spacing (walking, from the plaza's edge) of one, starting at the entrances.
-  function placePlazas(R, S) {
+  function placePlazas(R, S, fixed) {
     var net = R.net, kn = R.keptNet, nodes = R.keptNodes, reach = S.spacing / 2 + S.plazaW / 2;
-    if (!nodes.length) { R.plazas = []; return; }
+    fixed = fixed || [];
+    var mine = fixed.map(function (q) { return { id: q.id, x: q.x, y: q.y, w: S.plazaW, d: S.plazaD, mine: true }; });
+    if (!nodes.length) { R.plazas = mine; return; }
     var within = {};
     nodes.forEach(function (n) {
       var d = dijkstra(kn, [n]).dist;
@@ -878,6 +912,12 @@
     });
     var covered = {}, chosen = [], at = {};
     function take(n) { chosen.push(n); within[n].forEach(function (m) { covered[m] = true; }); }
+    // plazas the player placed count first: they cover the path nearest them
+    mine.forEach(function (q) {
+      var near = null;
+      nodes.forEach(function (n) { var d = Math.hypot(net.nodes[n].x - q.x, net.nodes[n].y - q.y); if (!near || d < near.d) near = { d: d, n: n }; });
+      if (near && near.d < S.plazaW * 1.5) within[near.n].forEach(function (m) { covered[m] = true; });
+    });
     R.ents.forEach(function (e) {
       if (e.node === null || chosen.indexOf(e.node) >= 0) return;
       take(e.node);
@@ -887,7 +927,10 @@
       at[e.node] = { x: e.cx + dx / dl * step, y: e.cy + dy / dl * step };
     });
     var minGap = Math.max(S.plazaW * 2, S.spacing / 2);
-    function spaced(n) { return chosen.every(function (q) { return Math.hypot(net.nodes[q].x - net.nodes[n].x, net.nodes[q].y - net.nodes[n].y) >= minGap; }); }
+    function spaced(n) {
+      return chosen.every(function (q) { return Math.hypot(net.nodes[q].x - net.nodes[n].x, net.nodes[q].y - net.nodes[n].y) >= minGap; }) &&
+        mine.every(function (q) { return Math.hypot(q.x - net.nodes[n].x, q.y - net.nodes[n].y) >= minGap; });
+    }
     for (var guard = 0; guard < 300; guard++) {
       var best = null;
       [true].some(function (strict) {
@@ -908,8 +951,9 @@
       var q = at[n] || net.nodes[n], pz = { x: q.x, y: q.y, w: S.plazaW, d: S.plazaD };
       var blocks = R.circles.concat(R.ents.map(function (e) { return { x: e.cx, y: e.cy, r: Math.hypot(e.w, e.d) / 2 }; }));
       nudgeClear(pz, blocks, q, 16);
+      pz.id = 'auto' + n;
       return pz;
-    });
+    }).concat(mine);
     // plazas also stay clear of each other's footprint
   }
   // how far a plaza (centred box) cuts into a round enclosure; 0 if clear
@@ -942,9 +986,14 @@
   function computeLayout(units, themeNames, p) {
     var S = L(), style = 'theme-loops', variant = p.setup.variant || 0;
     R_VARIANT = variant;
-    var key = JSON.stringify([variant, p.setup.entrances, S, themeNames, units.map(function (u) { return [u.kind, u.num, u.themeNow, Math.round(u.area), u.keys, u.w, u.d]; })]);
+    var key = JSON.stringify([variant, p.layout || null, p.setup.entrances, S, themeNames, units.map(function (u) { return [u.kind, u.num, u.themeNow, Math.round(u.area), u.keys, u.w, u.d]; })]);
     if (layoutCache.key === key) return layoutCache.result;
     if (!window.d3 || !d3.packSiblings || !d3.Delaunay) throw new Error('The drawing library didn’t load. Please refresh the page.');
+    if (p.layout && p.layout.manual) {
+      var MR = manualLayout(units, themeNames, p, S);
+      layoutCache = { key: key, result: MR };
+      return MR;
+    }
     var auto = p.setup.entrances === 'auto', nEnt = auto ? 1 : Number(p.setup.entrances) || 1;
     var more = { staff: {}, plaza: {} }, R = null;
     for (var tries = 0; tries < 24; tries++) {
@@ -987,6 +1036,73 @@
     window.PZ_ZOO_LAYOUT = res; // for troubleshooting
     layoutCache = { key: key, result: res };
     return res;
+  }
+  // ---------- the player's own arrangement ----------
+  // Once something is dragged, every position is saved with the plan; the paths
+  // are then worked out again from wherever things are.
+  function manualLayout(units, themeNames, p, S) {
+    var Lm = p.layout, byTheme = baseItems(units, themeNames), circles = [], sr = Math.sqrt(S.staffW * S.staffD / Math.PI), placedNew = false;
+    var nEnt = p.setup.entrances === 'auto' ? (Lm.ents ? Lm.ents.length : 1) || 1 : Number(p.setup.entrances) || 1;
+    themeNames.forEach(function (t, ti) {
+      byTheme[t].forEach(function (it) { it.theme = t; it.cluster = ti; var q = Lm.pos[it.seed]; if (q) { it.x = q.x; it.y = q.y; } else it.pending = true; circles.push(it); });
+    });
+    (Lm.staff || []).forEach(function (st) {
+      circles.push({ type: 'staff', x: st.x, y: st.y, r: sr, A: S.staffW * S.staffD, theme: null, cluster: -1, seed: st.id, label: 'Staff', short: 'S', title: 'Staff area (keeper huts and other staff buildings)' });
+    });
+    // new enclosures go in a free spot near the rest of their theme
+    circles.filter(function (c) { return c.pending; }).forEach(function (c) {
+      var mates = circles.filter(function (o) { return !o.pending && o.theme === c.theme; }), base = mates.length ? mates : circles.filter(function (o) { return !o.pending; });
+      var cx = 0, cy = 0;
+      base.forEach(function (o) { cx += o.x / base.length; cy += o.y / base.length; });
+      var spot = freeSpot(circles, cx, cy, c.r);
+      c.x = spot.x; c.y = spot.y; c.pending = false;
+      Lm.pos[c.seed] = { x: c.x, y: c.y };
+      placedNew = true;
+    });
+    var clusters = themeNames.map(function (t) {
+      var m = circles.filter(function (c) { return c.theme === t; });
+      if (!m.length) return null;
+      var x = 0, y = 0;
+      m.forEach(function (c) { x += c.x / m.length; y += c.y / m.length; });
+      var r = Math.max.apply(null, m.map(function (c) { return Math.hypot(c.x - x, c.y - y) + c.r; }));
+      return { theme: t, x: x, y: y, r: r };
+    }).filter(Boolean);
+    var R = finish(circles, clusters, S, nEnt, Lm.ents);
+    if (R.problems.some(function (q) { return q.kind === 'staff'; })) {
+      // a move left a habitat too far from staff: add staff areas where they reach the most
+      var before = circles.length;
+      rimStaff(circles, S);
+      circles.slice(before).forEach(function (c) { c.seed = 'st' + uid(); Lm.staff.push({ id: c.seed, x: c.x, y: c.y }); });
+      if (circles.length > before) { placedNew = true; R = finish(circles, clusters, S, nEnt, Lm.ents); }
+    }
+    if (!Lm.ents || Lm.ents.length !== nEnt) { Lm.ents = R.ents.map(function (e) { return { x: e.cx, y: e.cy }; }); placedNew = true; }
+    placePlazas(R, S, Lm.plazas || []);
+    if (placedNew) save();
+    var issues = [];
+    if (R.problems.some(function (q) { return q.kind === 'staff'; })) issues.push('Some habitats are more than ' + S.staffMax + ' m from a staff area.');
+    var res = { R: R, S: S, nEnt: nEnt, auto: false, manual: true, issues: issues, bb: circleBounds(R.circles, R.ents, 18) };
+    window.PZ_ZOO_LAYOUT = res;
+    return res;
+  }
+  function freeSpot(circles, cx, cy, r) {
+    for (var k = 0; k < 400; k++) {
+      var a = k * 2.4, d = 6 * Math.sqrt(k) * 3, x = cx + Math.cos(a) * d, y = cy + Math.sin(a) * d;
+      if (circles.every(function (o) { return o.pending || Math.hypot(o.x - x, o.y - y) > o.r + r + 10; })) return { x: x, y: y };
+    }
+    return { x: cx, y: cy };
+  }
+  // Save the current automatic layout as the player's own, so it can be changed by hand.
+  function toManual(p) {
+    if (p.layout && p.layout.manual) return p.layout;
+    var LR = layoutCache.result;
+    var Lm = { manual: true, pos: {}, staff: [], plazas: [], ents: [] };
+    if (LR && LR.R) {
+      LR.R.circles.forEach(function (c) { if (c.type === 'staff') Lm.staff.push({ id: c.seed, x: c.x, y: c.y }); else Lm.pos[c.seed] = { x: c.x, y: c.y }; });
+      LR.R.plazas.forEach(function (q) { if (q.mine) Lm.plazas.push({ id: q.id, x: q.x, y: q.y }); });
+      LR.R.ents.forEach(function (e) { Lm.ents.push({ x: e.cx, y: e.cy }); });
+    }
+    p.layout = Lm;
+    return Lm;
   }
   function circleBounds(circles, ents, pad) {
     pad = pad || 0;
@@ -1076,7 +1192,7 @@
         '<text x="' + f1(c.x) + '" y="' + f1(c.y) + '" font-size="' + f1(Math.min(6.5, w / 4.5)) + '" fill="' + col + '" text-anchor="middle" dominant-baseline="central">' + txt + '</text>';
     }
     R.circles.forEach(function (c) {
-      var g = '<g><title>' + esc(c.title || '') + '</title>';
+      var g = '<g class="drag" data-drag="c|' + esc(c.seed) + '"><title>' + esc(c.title || '') + (c.type === 'staff' ? ' (drag to move, tap to remove)' : ' (drag to move)') + '</title>';
       if (c.type === 'habitat') g += shape(c, 0, colorOf[c.theme], ' stroke="#4f5f47" stroke-width="0.9"') + label(c, c.short, '#1f2b1c');
       else if (c.type === 'aquarium') {
         g += shape(c, 0, '#9ccbe3', ' stroke="#2f6680" stroke-width="1.1"');
@@ -1088,8 +1204,8 @@
       else if (c.type === 'staff') g += box(c, S.staffW, S.staffD, '#9b8db3', '#6c5e85', 'Staff', '#fff');
       svg += g + '</g>';
     });
-    R.plazas.forEach(function (pz) {
-      svg += '<g><title>Guest plaza: 2 food, 2 drink, gift shop, toilet</title>' + box(pz, S.plazaW, S.plazaD, '#f0b46a', '#b97a2e', 'Plaza', '#4a2f0c') + '</g>';
+    R.plazas.forEach(function (pz, i) {
+      svg += '<g class="drag" data-drag="p|' + esc(pz.id || ('auto' + i)) + '"><title>Guest plaza: 2 food, 2 drink, gift shop, toilet (drag to move' + (pz.mine ? ', tap to remove' : '') + ')</title>' + box(pz, S.plazaW, S.plazaD, '#f0b46a', '#b97a2e', 'Plaza', '#4a2f0c') + '</g>';
     });
     // theme names, placed where they don't cover staff areas, plazas, entrances or other names
     var avoid = [];
@@ -1119,7 +1235,7 @@
       svg += '<text x="' + f1(best.x) + '" y="' + f1(best.y) + '" font-size="' + f1(fs) + '" font-weight="700" letter-spacing="0.08em" fill="#3c4a37" stroke="#f7f3ea" stroke-width="2.4" paint-order="stroke" text-anchor="middle" dominant-baseline="central">' + esc(txt) + '</text>';
     });
     R.ents.forEach(function (e, i) {
-      svg += '<g><title>Entrance ' + (i + 1) + '</title><rect x="' + f1(e.x) + '" y="' + f1(e.y) + '" width="' + f1(e.w) + '" height="' + f1(e.d) + '" rx="4" fill="#3d6a47"/>' +
+      svg += '<g class="drag" data-drag="e|' + i + '"><title>Entrance ' + (i + 1) + ' (drag to move)</title><rect x="' + f1(e.x) + '" y="' + f1(e.y) + '" width="' + f1(e.w) + '" height="' + f1(e.d) + '" rx="4" fill="#3d6a47"/>' +
         '<text x="' + f1(e.cx) + '" y="' + f1(e.cy) + '" font-size="6.5" fill="#fff" text-anchor="middle" dominant-baseline="central">Entrance</text></g>';
     });
     var sx = vb[0] + pad, sy = vb[1] + vb[3] - 9;
@@ -1191,6 +1307,113 @@
       html += '</section>';
     });
     panel.innerHTML = html;
+    setupDrag();
+  }
+
+  // ---------- dragging things on the map ----------
+  function setupDrag() {
+    var svg = document.querySelector('#panel .zoo-map');
+    if (!svg) return;
+    var drag = null;
+    function pt(e) { var q = svg.createSVGPoint(); q.x = e.clientX; q.y = e.clientY; return q.matrixTransform(svg.getScreenCTM().inverse()); }
+    svg.addEventListener('pointerdown', function (e) {
+      var g = e.target.closest('.drag');
+      if (!g || drag) return;
+      e.preventDefault();
+      try { g.setPointerCapture(e.pointerId); } catch (err) {}
+      var q = pt(e);
+      drag = { g: g, x0: q.x, y0: q.y, dx: 0, dy: 0, id: e.pointerId, px: e.clientX, py: e.clientY };
+      g.classList.add('dragging');
+      g.parentNode.appendChild(g); // draw it on top while moving
+    });
+    svg.addEventListener('pointermove', function (e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      var q = pt(e);
+      drag.dx = q.x - drag.x0; drag.dy = q.y - drag.y0;
+      drag.g.setAttribute('transform', 'translate(' + drag.dx.toFixed(1) + ' ' + drag.dy.toFixed(1) + ')');
+    });
+    function end(e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      var d = drag, parts = d.g.getAttribute('data-drag').split('|');
+      drag = null;
+      d.g.classList.remove('dragging');
+      if (Math.hypot(e.clientX - d.px, e.clientY - d.py) < 4) { d.g.removeAttribute('transform'); tapItem(parts); return; }
+      moveItem(parts, d.dx, d.dy);
+    }
+    svg.addEventListener('pointerup', end);
+    svg.addEventListener('pointercancel', function () { if (drag) { drag.g.removeAttribute('transform'); drag.g.classList.remove('dragging'); drag = null; } });
+  }
+  function moveItem(parts, dx, dy) {
+    var Lm = toManual(plan()), kind = parts[0], id = parts[1], LR = layoutCache.result;
+    if (kind === 'c') {
+      var st = Lm.staff.filter(function (q) { return q.id === id; })[0];
+      var it = st || Lm.pos[id];
+      if (it) { it.x += dx; it.y += dy; makeRoom(Lm, id, it); }
+    } else if (kind === 'p') {
+      var mine = Lm.plazas.filter(function (q) { return q.id === id; })[0];
+      if (mine) { mine.x += dx; mine.y += dy; }
+      else {
+        // an automatic plaza that's been moved by hand becomes the player's own
+        var auto = LR && LR.R.plazas.filter(function (q) { return q.id === id; })[0];
+        if (auto) Lm.plazas.push({ id: 'pl' + uid(), x: auto.x + dx, y: auto.y + dy });
+      }
+    } else if (kind === 'e' && Lm.ents[Number(id)]) { Lm.ents[Number(id)].x += dx; Lm.ents[Number(id)].y += dy; }
+    changed();
+  }
+  // Push neighbours just far enough out of the way of something that was dropped on them.
+  function makeRoom(Lm, movedId, movedPos) {
+    var LR = layoutCache.result, S = L();
+    if (!LR) return;
+    var gap = S.P + 4, items = [];
+    LR.R.circles.forEach(function (c) {
+      var ref = c.type === 'staff' ? Lm.staff.filter(function (q) { return q.id === c.seed; })[0] : Lm.pos[c.seed];
+      if (ref) items.push({ id: c.seed, r: c.r, ref: ref, fixed: c.seed === movedId });
+    });
+    for (var round = 0; round < 30; round++) {
+      var moved = false;
+      items.forEach(function (a) {
+        items.forEach(function (b) {
+          if (a === b || b.fixed) return;
+          var dx = b.ref.x - a.ref.x, dy = b.ref.y - a.ref.y, d = Math.hypot(dx, dy) || 0.01, need = a.r + b.r + gap;
+          if (d >= need - 0.5) return;
+          // only the thing that was dropped, and whatever it then bumps, gets pushed
+          if (!a.fixed && !a.bumped) return;
+          var push = need - d;
+          b.ref.x += dx / d * push; b.ref.y += dy / d * push; b.bumped = true; moved = true;
+        });
+      });
+      if (!moved) break;
+    }
+  }
+  function tapItem(parts) {
+    var kind = parts[0], id = parts[1], LR = layoutCache.result;
+    var isStaff = kind === 'c' && LR && LR.R.circles.some(function (c) { return c.seed === id && c.type === 'staff'; });
+    if (kind === 'p') {
+      var Lm0 = plan().layout;
+      var mine = Lm0 && Lm0.plazas.some(function (q) { return q.id === id; });
+      if (!mine) { toast('This plaza is placed automatically to keep plazas within reach. Drag it to move it.'); return; }
+      if (!window.confirm('Remove this plaza?')) return;
+      Lm0.plazas = Lm0.plazas.filter(function (q) { return q.id !== id; });
+      changed();
+    } else if (isStaff) {
+      if (!window.confirm('Remove this staff area?')) return;
+      var Lm = toManual(plan());
+      Lm.staff = Lm.staff.filter(function (q) { return q.id !== id; });
+      changed();
+    }
+  }
+  function addToMap(kind) {
+    var Lm = toManual(plan()), LR = layoutCache.result, S = L();
+    var obstacles = LR && LR.R ? LR.R.circles.map(function (c) { return { x: c.x, y: c.y, r: c.r }; }) : [];
+    (LR && LR.R ? LR.R.plazas : []).forEach(function (q) { obstacles.push({ x: q.x, y: q.y, r: q.w * 0.7 }); });
+    var cx = 0, cy = 0;
+    obstacles.forEach(function (o) { cx += o.x / (obstacles.length || 1); cy += o.y / (obstacles.length || 1); });
+    var r = kind === 'staff' ? Math.hypot(S.staffW, S.staffD) / 2 : Math.hypot(S.plazaW, S.plazaD) / 2;
+    var spot = freeSpot(obstacles, cx, cy, r);
+    if (kind === 'staff') Lm.staff.push({ id: 'st' + uid(), x: spot.x, y: spot.y });
+    else Lm.plazas.push({ id: 'pl' + uid(), x: spot.x, y: spot.y });
+    changed();
+    toast((kind === 'staff' ? 'Staff area' : 'Plaza') + ' added. Drag it where you want it');
   }
   function stat(n, l) { return '<div class="stat"><div class="n">' + n + '</div><div class="l">' + esc(l) + '</div></div>'; }
 
@@ -1219,7 +1442,7 @@
       var a = model.animals[m.key];
       var moveOpts = '<option value="">Move to…</option>';
       allHab.forEach(function (o) { if (o.h !== h) moveOpts += '<option value="' + o.h.id + '">' + esc(habitatLabel(o.h, o.num)) + '</option>'; });
-      if (h.members.length > 1) moveOpts += '<option value="__new">Its own habitat</option>';
+      if (h.members.length > 1) moveOpts += '<option value="__new">Separate habitat</option>';
       var big = largestGroup(a), unit = a.collective ? 'collectives' : 'animals';
       html += '<li><span class="mname"><strong>' + esc(a.name) + '</strong></span>' +
         '<label class="gsize">Group size <input type="number" min="1" step="1" inputmode="numeric" data-action="size" data-h="' + h.id + '" data-i="' + idx + '"' +
@@ -1337,11 +1560,12 @@
       var p = plan();
       if (!p.habitats.length && !p.exhibits.length) return;
       if (!window.confirm('Remove every habitat and exhibit from "' + p.name + '"? Your setup choices stay. This can’t be undone.')) return;
-      p.habitats = []; p.exhibits = []; p.setup.variant = 0;
+      p.habitats = []; p.exhibits = []; p.setup.variant = 0; delete p.layout;
       changed(); toast('Zoo cleared');
     });
     $('panel').addEventListener('click', function (e) {
       if (!e.target.closest('#regen')) return;
+      delete plan().layout;
       plan().setup.variant = (plan().setup.variant || 0) + 1;
       changed(); toast('New layout drawn');
     });
@@ -1351,7 +1575,12 @@
       state.plans = state.plans.filter(function (x) { return x.id !== state.current; });
       state.current = state.plans[0].id; changed();
     });
-    $('set-theme').addEventListener('change', function () { plan().setup.theme = this.value; changed(); });
+    $('set-theme').addEventListener('change', function () {
+      // new themes mean a new arrangement
+      if (plan().layout) toast('The map was redrawn for the new themes');
+      plan().setup.theme = this.value; delete plan().layout; changed();
+    });
+    $('add-facility').addEventListener('change', function () { var k = this.value; this.value = ''; if (k) addToMap(k); });
     $('set-entrances').addEventListener('change', function () { plan().setup.entrances = this.value === 'auto' ? 'auto' : Number(this.value); changed(); });
 
   }

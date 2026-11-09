@@ -31,8 +31,10 @@
   .layout { padding: 0 10px 32px; display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: 18px; align-items: start; }
   @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
-  .side { display: grid; gap: 14px; position: sticky; top: 12px; }
-  @media (max-width: 860px) { .side { position: static; } }
+  .side { display: grid; gap: 14px; position: sticky; top: 12px; align-content: start;
+    max-height: calc(100vh - 24px); overflow-y: auto; overscroll-behavior: contain;
+    padding: 2px 6px 2px 2px; margin: -2px -6px -2px -2px; scrollbar-width: thin; scrollbar-color: #c9c1ad transparent; }
+  @media (max-width: 860px) { .side { position: static; max-height: none; overflow: visible; padding: 0; margin: 0; } }
   .side h2 { font-size: 19px; margin-bottom: 10px; }
   .field { display: grid; gap: 4px; margin-bottom: 10px; font-size: 14px; }
   .field > span { font-weight: 500; }
@@ -620,7 +622,51 @@
         all.push(it);
       });
     });
+    compactThemes(clusters, all, S);
     return { circles: all, clusters: clusters };
+  }
+  // Packing themes as round blobs leaves empty corners that push some theme areas far from
+  // the rest (too far for a path to cross). Slide each theme area in toward the middle until
+  // it sits one path-gap away from its neighbours.
+  function compactThemes(clusters, all, S) {
+    if (clusters.length < 2) return;
+    var minGap = S.P + 12;
+    var groups = clusters.map(function (c, ci) { return all.filter(function (it) { return it.cluster === ci; }); });
+    function clear(g, dx, dy) {
+      for (var i = 0; i < g.length; i++) {
+        var a = g[i], ax = a.x + dx, ay = a.y + dy;
+        for (var j = 0; j < all.length; j++) {
+          var b = all[j];
+          if (b.cluster === a.cluster) continue;
+          if (Math.hypot(ax - b.x, ay - b.y) - a.r - b.r < minGap) return false;
+        }
+      }
+      return true;
+    }
+    function shift(g, dx, dy) { g.forEach(function (it) { it.x += dx; it.y += dy; }); }
+    for (var round = 0; round < 18; round++) {
+      var cx = 0, cy = 0, wsum = 0;
+      all.forEach(function (it) { cx += it.x * it.A; cy += it.y * it.A; wsum += it.A; });
+      cx /= wsum || 1; cy /= wsum || 1;
+      var moved = 0;
+      groups.forEach(function (g) {
+        var gx = 0, gy = 0, gw = 0;
+        g.forEach(function (it) { gx += it.x * it.A; gy += it.y * it.A; gw += it.A; });
+        gx /= gw || 1; gy /= gw || 1;
+        var far = Math.hypot(cx - gx, cy - gy);
+        if (far < 1) return;
+        var base = Math.atan2(cy - gy, cx - gx);
+        for (var step = Math.min(40, far); step >= 1; step /= 2) {
+          var done = [0, 0.5, -0.5, 1, -1].some(function (turn) {
+            var ux = Math.cos(base + turn), uy = Math.sin(base + turn);
+            if (clear(g, ux * step, uy * step)) { shift(g, ux * step, uy * step); moved += step * Math.cos(turn); return true; }
+            return false;
+          });
+          if (done) break;
+        }
+      });
+      if (moved < 2) break;
+    }
   }
 
   // The network of gaps between neighbouring enclosures.
@@ -786,7 +832,7 @@
         if (res) { var e2 = net.edges[best.ei]; walkBack(net, res, res.dist[e2.a] <= res.dist[e2.b] ? e2.a : e2.b, kept); }
       });
     }
-    connectAll(net, kept);
+    connectAll(net, kept, circles);
     // trim dead-end paths that don't lead past anything that needs them
     var count = circles.map(function (c, ci) { return fronting[ci].filter(function (ei) { return kept[ei]; }).length; });
     for (var guard = 0; guard < 2000; guard++) {
@@ -852,7 +898,11 @@
     }
   }
   // Join separate pieces of path into one network.
-  function connectAll(net, kept) {
+  function segGap(ax, ay, bx, by, cx, cy) {
+    var vx = bx - ax, vy = by - ay, l2 = vx * vx + vy * vy, u = l2 ? Math.max(0, Math.min(1, ((cx - ax) * vx + (cy - ay) * vy) / l2)) : 0;
+    return Math.hypot(ax + u * vx - cx, ay + u * vy - cy);
+  }
+  function connectAll(net, kept, circles) {
     for (var guard = 0; guard < 40; guard++) {
       var ids = Object.keys(kept).map(Number);
       if (!ids.length) return;
@@ -864,7 +914,24 @@
       if (!others.length) return;
       var res = dijkstra(net, Object.keys(comp).map(Number)), best = null;
       others.forEach(function (n) { if (res.dist[n] !== Infinity && (best === null || res.dist[n] < res.dist[best])) best = n; });
-      if (best === null) return;
+      if (best === null) {
+        // part of the zoo the gap network can't reach: join it with a short straight path
+        var pair = null, compIds = Object.keys(comp).map(Number);
+        compIds.forEach(function (a) {
+          others.forEach(function (b) {
+            var P = net.nodes[a], Q = net.nodes[b], d = Math.hypot(P.x - Q.x, P.y - Q.y);
+            if (circles && circles.some(function (c) { return !isBack(c) && segGap(P.x, P.y, Q.x, Q.y, c.x, c.y) < c.r * 0.9; })) d += 1e6;
+            if (!pair || d < pair.d) pair = { a: a, b: b, d: d };
+          });
+        });
+        if (!pair) return;
+        var P2 = net.nodes[pair.a], Q2 = net.nodes[pair.b];
+        net.edges.push({ a: pair.a, b: pair.b, len: Math.hypot(P2.x - Q2.x, P2.y - Q2.y), fronts: [], link: true });
+        var ne = net.edges.length - 1;
+        net.adj[pair.a].push(ne); net.adj[pair.b].push(ne);
+        kept[ne] = true;
+        continue;
+      }
       var node = best, g = 0;
       while (res.prev[node] >= 0 && g++ < 5000) { var ei = res.prev[node], e = net.edges[ei]; kept[ei] = true; node = e.a === node ? e.b : e.a; }
     }
@@ -1036,6 +1103,14 @@
     }
     return circles.reduce(function (m, c) { return m + boxOverlap(pz, c); }, 0);
   }
+  function mapFit(bb, S, issues) {
+    if (!(bb.w > S.map || bb.h > S.map)) return;
+    var over = [];
+    if (bb.w > S.map) over.push(fmt(bb.w) + ' m wide');
+    if (bb.h > S.map) over.push(fmt(bb.h) + ' m tall');
+    var pct = Math.round(bb.w * bb.h / (S.map * S.map) * 1000) / 10;
+    issues.push('This zoo is ' + over.join(' and ') + ', but the map is only ' + fmt(S.map) + ' m across, so it won’t fit' + (pct <= 100 ? ' even though it uses ' + pct + '% of the map’s area' : '') + '.');
+  }
   function rectCircleGap(r, c) {
     var dx = Math.max(r.x - c.x, 0, c.x - (r.x + r.w)), dy = Math.max(r.y - c.y, 0, c.y - (r.y + r.h));
     return Math.max(0, Math.hypot(dx, dy) - c.r);
@@ -1089,7 +1164,7 @@
       if (habs.length && !habs.some(function (h) { return rectCircleGap(box, h) <= S.entHab; })) issues.push('Entrance ' + (i + 1) + ' has no habitat within ' + S.entHab + ' m.');
     });
     var bb = circleBounds(R.circles, R.ents, 18);
-    if (bb.w > S.map || bb.h > S.map) issues.push('This zoo is bigger than a ' + S.map + ' m map.');
+    mapFit(bb, S, issues);
     var res = { R: R, S: S, nEnt: nEnt, auto: auto, issues: issues, bb: bb, water: autoLakes(R) };
     window.PZ_ZOO_LAYOUT = res; // for troubleshooting
     layoutCache = { key: key, result: res };
@@ -1169,6 +1244,7 @@
     var issues = [];
     if (R.problems.some(function (q) { return q.kind === 'staff'; })) issues.push('Some habitats are more than ' + S.staffMax + ' m from a staff area.');
     var res = { R: R, S: S, nEnt: nEnt, auto: false, manual: true, issues: issues, bb: circleBounds(R.circles, R.ents, 18), water: Lm.water || [] };
+    mapFit(res.bb, S, issues);
     window.PZ_ZOO_LAYOUT = res;
     return res;
   }
@@ -2668,6 +2744,22 @@
     if (editRide && !findRide(p, editRide)) { editRide = null; delMode = false; }
     // water, and how it's shared between habitats
     var W = LR.water || [], habPolys = habPolysLayout(R), wst = waterStats(habPolys, W);
+    if (!LR.manual && !LR.lakesFitted) {
+      // a lake drawn in the middle of a lumpy habitat can poke out past its edge; grow it until
+      // the part inside the habitat is enough
+      for (var lf = 0; lf < 8; lf++) {
+        var shortBy = shortfalls(habPolys, wst, true), sds = Object.keys(shortBy);
+        if (!sds.length) break;
+        sds.forEach(function (sd) {
+          var wl = W.filter(function (w) { return w.home === sd && w.kind === 'lake'; })[0];
+          if (!wl) return;
+          wl.area = (wl.area || wl.forNeed * 1.02) + shortBy[sd] * 1.3 + 1;
+          wl.pts = scaleShape(defaultShape('lake' + sd, 10), wl.area);
+        });
+        wst = waterStats(habPolys, W);
+      }
+      LR.lakesFitted = true;
+    }
     lastWater = { stats: wst, W: W, habs: habPolys };
     if (waterSel && !W.some(function (w) { return w.id === waterSel; })) waterSel = null;
     var wPolys = W.map(function (wb) { return { wb: wb, P: waterPoly(wb) }; });
@@ -3228,7 +3320,12 @@
     var all = allThemeValues(type);
     var html = '<label>Theme: <select data-action="theme" data-' + attr + '="' + id + '"><option value="">' +
       (u.override ? 'Automatic' : 'Automatic (' + esc(u.themeNow) + ')') + '</option>';
-    all.forEach(function (t) { html += '<option value="' + esc(t) + '"' + (u.override === t ? ' selected' : '') + '>' + esc(t) + '</option>'; });
+    // only themes that suit at least one animal in this enclosure (plus the one already chosen)
+    var fits = {};
+    (u.keys || []).forEach(function (k) { candidates(k, type).forEach(function (c) { fits[norm(c)] = 1; }); });
+    var shown = all.filter(function (t) { return fits[norm(t)] || u.override === t; });
+    if (u.override && shown.indexOf(u.override) < 0) shown.push(u.override);
+    shown.forEach(function (t) { html += '<option value="' + esc(t) + '"' + (u.override === t ? ' selected' : '') + '>' + esc(t) + '</option>'; });
     return html + '</select></label>';
   }
   var themeValuesCache = {};

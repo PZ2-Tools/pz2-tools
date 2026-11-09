@@ -119,6 +119,11 @@
   .zoom-ctl { position: absolute; bottom: 8px; right: 8px; display: grid; gap: 4px; }
   .zoom-ctl button { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-size: 19px; line-height: 1; font-weight: 700; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
   .zoom-ctl button:hover { border-color: var(--accent); }
+  .zoom-ctl button.sel-btn { font-size: 0; display: grid; place-items: center; }
+  .zoom-ctl button.sel-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .zoo-map g.selected { filter: drop-shadow(0 0 1.6px #e8820c) drop-shadow(0 0 1.6px #e8820c); }
+  .zoo-map.selecting { cursor: crosshair; }
+  .zoo-map .marquee { fill: rgba(232, 130, 12, 0.10); stroke: #e8820c; stroke-dasharray: 4 3; pointer-events: none; }
   .zoo-map.panning { cursor: grabbing; }
   .zoo-map { user-select: none; -webkit-user-select: none; display: block; width: 100%; height: auto; max-height: 75vh; font-family: "DM Sans", system-ui, sans-serif; }
   .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 13px; }
@@ -904,6 +909,51 @@
     var vx = bx - ax, vy = by - ay, l2 = vx * vx + vy * vy, u = l2 ? Math.max(0, Math.min(1, ((cx - ax) * vx + (cy - ay) * vy) / l2)) : 0;
     return Math.hypot(ax + u * vx - cx, ay + u * vy - cy);
   }
+  // Big aquariums get a viewing tunnel through the middle (guests can't see the middle from
+  // the edge). Pick a path spot on each side, roughly opposite, and make sure paths reach both.
+  function tunnelEnds(net, kept, circles) {
+    if (!net.edges.length) return;
+    var used = {};
+    net.edges.forEach(function (e) { used[e.a] = 1; used[e.b] = 1; });
+    var all = Object.keys(used).map(Number);
+    circles.forEach(function (c) {
+      c.tunnel = null;
+      if (c.type !== 'aquarium' || !(c.r > c.D)) return;
+      var keptNodes = {};
+      Object.keys(kept).forEach(function (ei) { keptNodes[net.edges[ei].a] = 1; keptNodes[net.edges[ei].b] = 1; });
+      var pick = null;
+      [[30, 0.3], [60, 0.2], [100, -0.2]].some(function (lim) { pick = tunnelPick(lim[0], lim[1]); return !!pick; });
+      if (!pick) return;
+      var A = pick.A, B = pick.B;
+      function tunnelPick(range, minOpp) {
+      var near = all.filter(function (n) { var q = net.nodes[n], d = Math.hypot(q.x - c.x, q.y - c.y) - c.r; return d > -2 && d < range; });
+      if (near.length < 2) return null;
+      // first end: the nearest spot already on a path (or just the nearest)
+      var A = null;
+      near.forEach(function (n) { var q = net.nodes[n], d = Math.hypot(q.x - c.x, q.y - c.y) - c.r + (keptNodes[n] ? 0 : 25); if (A === null || d < A.d) A = { n: n, d: d }; });
+      var ax = net.nodes[A.n].x - c.x, ay = net.nodes[A.n].y - c.y, al = Math.hypot(ax, ay) || 1;
+      var B = null;
+      near.forEach(function (n) {
+        if (n === A.n) return;
+        var q = net.nodes[n], dx = q.x - c.x, dy = q.y - c.y, dl = Math.hypot(dx, dy) || 1;
+        var opp = -(dx * ax + dy * ay) / (dl * al);
+        if (opp < minOpp) return;
+        var score = opp * 60 - (dl - c.r) - (keptNodes[n] ? 0 : 12);
+        if (!B || score > B.score) B = { n: n, score: score };
+      });
+      return B ? { A: A, B: B } : null;
+      }
+      // join any end that isn't on a path yet
+      [A.n, B.n].forEach(function (n) {
+        var kn = [];
+        Object.keys(kept).forEach(function (ei) { kn.push(net.edges[ei].a, net.edges[ei].b); });
+        if (!kn.length || kn.indexOf(n) >= 0) return;
+        var res = dijkstra(net, kn);
+        if (res.dist[n] !== Infinity) walkBack(net, res, n, kept);
+      });
+      c.tunnel = { a: A.n, b: B.n };
+    });
+  }
   function connectAll(net, kept, circles) {
     for (var guard = 0; guard < 40; guard++) {
       var ids = Object.keys(kept).map(Number);
@@ -958,6 +1008,7 @@
     var style = 'theme-loops';
     var ncs = circles.filter(function (c) { return !c.inHab; });
     var net = gapNetwork(ncs, S), kept = choosePaths(net, ncs, clusters, style);
+    tunnelEnds(net, kept, ncs);
     var keptIdx = Object.keys(kept).map(Number), problems = [];
     var keptNet = { nodes: net.nodes, edges: keptIdx.map(function (ei) { return net.edges[ei]; }) };
     keptNet.adj = net.nodes.map(function () { return []; });
@@ -1704,6 +1755,17 @@
   // A stretched habitat keeps its outline as points around its centre (pos.shape).
   // Its size is the area inside that outline, never below the habitat's minimum.
   var shapeSel = null, shapeEdit = null;
+  // several things selected on the map, to move together (Shift+click, or the Select button)
+  var multiSel = [], selMode = false;
+  function selectable(dragId) { var k = dragId.split('|')[0]; return k === 'c' || k === 'p' || k === 'e'; }
+  function showSelection(svg) {
+    svg.querySelectorAll('g.selected').forEach(function (g) { g.classList.remove('selected'); });
+    multiSel = multiSel.filter(function (id) {
+      var g = svg.querySelector('g.drag[data-drag="' + id.replace(/"/g, '\\"') + '"]');
+      if (g) g.classList.add('selected');
+      return !!g;
+    });
+  }
   function defaultShape(seed, r) {
     // the same wobbly outline the map draws for an unstretched habitat
     var rnd = rand(seedOf(seed + '|' + R_VARIANT)), n = 14, pts = [], ph = rnd() * 6.28;
@@ -2840,13 +2902,35 @@
       return '<rect x="' + f1(c.x - w / 2) + '" y="' + f1(c.y - h / 2) + '" width="' + f1(w) + '" height="' + f1(h) + '" rx="3" fill="' + fill + '" stroke="' + stroke + '" stroke-width="0.8"/>' +
         '<text x="' + f1(c.x) + '" y="' + f1(c.y) + '" font-size="' + f1(Math.min(6.5, w / 4.5)) + '" fill="' + col + '" text-anchor="middle" dominant-baseline="central">' + txt + '</text>';
     }
+    // Viewing tunnel: guests can't see the middle of a big aquarium from its edge, so a walkway
+    // runs through it, joined at both ends to the nearest paths.
+    var tunnels = 0;
+    function tunnelSvg(c) {
+      var nA = c.tunnel ? R.net.nodes[c.tunnel.a] : null, nB = c.tunnel ? R.net.nodes[c.tunnel.b] : null;
+      var edge = function (n, fx, fy) {
+        var dx = n ? n.x - c.x : fx, dy = n ? n.y - c.y : fy, dl = Math.hypot(dx, dy) || 1;
+        return { x: c.x + dx / dl * c.r * 0.85, y: c.y + dy / dl * c.r * 0.85 };
+      };
+      var e1 = edge(nA, 1, 0), e2 = edge(nB, -1, 0);
+      var line = [e1, { x: c.x, y: c.y }, e2].map(function (q) { return f1(q.x) + ',' + f1(q.y); }).join(' ');
+      var out = '';
+      // short walkways from the paths to the tunnel ends
+      [[nA, e1], [nB, e2]].forEach(function (pr) {
+        if (!pr[0]) return;
+        out += '<line x1="' + f1(pr[0].x) + '" y1="' + f1(pr[0].y) + '" x2="' + f1(pr[1].x) + '" y2="' + f1(pr[1].y) + '" stroke="#d9c79e" stroke-width="' + S.P + '" stroke-linecap="round"/>';
+      });
+      out += '<polyline points="' + line + '" fill="none" stroke="#2f6680" stroke-width="' + S.P + '" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '<polyline points="' + line + '" fill="none" stroke="#e4f3fa" stroke-width="' + f1(Math.max(1, S.P - 1.6)) + '" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '<polyline points="' + line + '" fill="none" stroke="#2f6680" stroke-width="0.5" stroke-dasharray="2 1.5"/>';
+      return out;
+    }
     R.circles.forEach(function (c) {
       if (c.type === 'station' || c.type === 'part') return;
-      var g = '<g class="drag" data-drag="c|' + esc(c.seed) + '"><title>' + esc(c.title || '') + (c.type === 'staff' ? ' (drag to move, tap to remove)' : c.type === 'habitat' || c.type === 'aquarium' ? ' (drag to move, tap to change its shape)' : ' (drag to move)') + '</title>';
+      var g = '<g class="drag" data-drag="c|' + esc(c.seed) + '"><title>' + esc((c.title || '') + (c.type === 'aquarium' && c.r > c.D ? '. Viewing tunnel: guests can’t see the middle of this aquarium from its edge' : '')) + (c.type === 'staff' ? ' (drag to move, tap to remove)' : c.type === 'habitat' || c.type === 'aquarium' ? ' (drag to move, tap to change its shape)' : ' (drag to move)') + '</title>';
       if (c.type === 'habitat') { g += shape(c, 0, colorOf[c.theme], ' stroke="#4f5f47" stroke-width="0.9" data-shape="' + esc(c.seed) + '"'); labelSvg += label(c, c.short, '#1f2b1c'); }
       else if (c.type === 'aquarium') {
         g += shape(c, 0, '#9ccbe3', ' stroke="#2f6680" stroke-width="1.1" data-shape="' + esc(c.seed) + '"');
-        if (c.r > c.D) g += '<line x1="' + f1(c.x - c.r * 0.8) + '" y1="' + f1(c.y) + '" x2="' + f1(c.x + c.r * 0.8) + '" y2="' + f1(c.y) + '" stroke="#d9c79e" stroke-width="' + S.P + '" stroke-linecap="round"/>';
+        if (c.r > c.D) { g += tunnelSvg(c); tunnels++; }
         labelSvg += label(c, c.short, '#123445');
       }
       else if (c.type === 'walk') g += rectFor(c, c.bw, c.bd, colorOf[c.theme], '#4f5f47', ' stroke-dasharray="3 2"') + label(c, c.short, '#1f2b1c');
@@ -2980,7 +3064,8 @@
 
     var area = bb.w * bb.h, mapA = S.map * S.map;
     var html = '<section class="card map-card"><div class="map-head"><h2>Layout concept</h2><span class="sub">about ' + fmt(bb.w) + ' × ' + fmt(bb.h) + ' m · ' + (Math.round(area / mapA * 1000) / 10) + '% of the map</span><span class="map-tools"><button type="button" class="secondary icon" id="undo" title="Undo" aria-label="Undo"' + (undoStack.length ? '' : ' disabled') + '>&#8630;</button><button type="button" class="secondary icon" id="redo" title="Redo" aria-label="Redo"' + (redoStack.length ? '' : ' disabled') + '>&#8631;</button><button type="button" class="secondary" id="regen">Regenerate plan</button></span></div>';
-    html += '<div class="map-wrap">' + svg + '<div class="zoom-ctl" role="group" aria-label="Zoom"><button type="button" data-zoom="in" title="Zoom in" aria-label="Zoom in">+</button><button type="button" data-zoom="out" title="Zoom out" aria-label="Zoom out">−</button><button type="button" data-zoom="fit" title="Show the whole zoo" aria-label="Show the whole zoo">⤢</button></div></div>';
+    html += '<div class="map-wrap">' + svg + '<div class="zoom-ctl" role="group" aria-label="Zoom"><button type="button" data-zoom="in" title="Zoom in" aria-label="Zoom in">+</button><button type="button" data-zoom="out" title="Zoom out" aria-label="Zoom out">−</button><button type="button" data-zoom="fit" title="Show the whole zoo" aria-label="Show the whole zoo">⤢</button>' +
+      '<button type="button" class="sel-btn" data-zoom="select" aria-pressed="' + selMode + '" title="Select several things to move together (or hold Shift and click). Drag across empty map to select everything in a box." aria-label="Select several things"><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2.4 1.8"/><path d="M10 9l7.5 3-3.2 1.2-1.3 3.3z" fill="currentColor"/></svg></button></div></div>';
     if (wsel) {
       var wr = wst.body[wsel.id] || { total: 0, by: {} }, parts2 = Object.keys(wr.by).map(function (sd) { var hx = habPolys.filter(function (x) { return x.seed === sd; })[0]; return hx ? fmt(wr.by[sd]) + ' m² in Habitat ' + hx.num : ''; }).filter(Boolean);
       var open2 = wr.total - Object.keys(wr.by).reduce(function (a, k) { return a + wr.by[k]; }, 0);
@@ -3002,6 +3087,7 @@
       '<span class="lg"><i style="background:#f0b46a"></i>Plaza</span><span class="lg"><i style="background:#9b8db3"></i>Staff area</span>' +
       '<span class="lg"><i style="background:#3d6a47"></i>Entrance</span><span class="lg"><i style="background:#d9c79e"></i>Path</span>';
     var nPl = R.plazas.length, nSt = R.circles.filter(function (c) { return c.type === 'staff'; }).length;
+    if (tunnels) legend += '<span class="lg"><i style="background:#e4f3fa;border-color:#2f6680;border-style:dashed"></i>Viewing tunnel</span>';
     if (W.length) legend += '<span class="lg"><i style="background:' + WATER_FILL + ';border-color:' + WATER_EDGE + '"></i>Water</span>';
     ridesOf(p).forEach(function (rd) { legend += '<span class="lg"' + (rd.hidden ? ' style="opacity:.5"' : '') + '><i style="background:' + rd.color + '"></i>' + esc(rd.name) + (rd.hidden ? ' (hidden)' : '') + '</span>'; });
     if (tracks.some(function (t) { return !t.rd.hidden && t.segs.some(function (g) { return g.red; }); })) legend += '<span class="lg"><i style="background:' + TIGHT_COLOR + '"></i>Bend too tight</span>';
@@ -3098,6 +3184,16 @@
   function zoomButton(which) {
     var svg = document.querySelector('#panel .zoo-map');
     if (!svg) return;
+    if (which === 'select') {
+      selMode = !selMode;
+      if (!selMode) multiSel = [];
+      var sb = document.querySelector('#panel .sel-btn');
+      if (sb) sb.setAttribute('aria-pressed', String(selMode));
+      svg.classList.toggle('selecting', selMode);
+      showSelection(svg);
+      if (selMode) toast('Tap things to select them, or drag across empty map to select everything in a box. Then drag any of them to move them all.');
+      return;
+    }
     if (which === 'fit') { view.k = 1; applyView(svg); return; }
     zoomAt(svg, which === 'in' ? 1.5 : 1 / 1.5);
   }
@@ -3106,9 +3202,19 @@
   function setupDrag() {
     var svg = document.querySelector('#panel .zoo-map');
     if (!svg) return;
-    var drag = null, touches = {}, pinch = null, pan = null;
+    var drag = null, touches = {}, pinch = null, pan = null, box = null;
     function pt(e) { var q = svg.createSVGPoint(); q.x = e.clientX; q.y = e.clientY; return q.matrixTransform(svg.getScreenCTM().inverse()); }
     applyView(svg);
+    svg.classList.toggle('selecting', selMode);
+    showSelection(svg);
+    if (!window.__pzSelEsc) {
+      window.__pzSelEsc = true;
+      document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape' || !multiSel.length) return;
+        multiSel = []; var m = document.querySelector('#panel .zoo-map'); if (m) showSelection(m);
+      });
+    }
+    function selGroups() { return multiSel.map(function (id) { return svg.querySelector('g.drag[data-drag="' + id.replace(/"/g, '\\"') + '"]'); }).filter(Boolean); }
     svg.addEventListener('wheel', function (e) {
       e.preventDefault();
       var q = pt(e);
@@ -3120,7 +3226,8 @@
       var ids = Object.keys(touches);
       if (ids.length === 2) {
         // a second finger means zoom: drop anything the first finger had picked up
-        if (drag) { drag.g.removeAttribute('transform'); drag.g.classList.remove('dragging'); svg.querySelectorAll('[data-drag][transform]').forEach(function (el) { if (!el.classList.contains('hs')) el.removeAttribute('transform'); }); drag = null; }
+        if (box) { if (box.el) box.el.remove(); box = null; }
+        if (drag) { (drag.group || []).forEach(function (gg) { gg.removeAttribute('transform'); }); drag.g.removeAttribute('transform'); drag.g.classList.remove('dragging'); svg.querySelectorAll('[data-drag][transform]').forEach(function (el) { if (!el.classList.contains('hs')) el.removeAttribute('transform'); }); drag = null; }
         var a = touches[ids[0]], b = touches[ids[1]];
         pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1 }; tap = null; pan = null;
       }
@@ -3144,7 +3251,14 @@
       if (!g && !drag) {
         // not something to drag: remember it in case it's a tap on a ride track or the open map
         var trk = e.target.closest('.trk');
-        tap = { x: e.clientX, y: e.clientY, id: e.pointerId, trk: trk ? trk.getAttribute('data-trk') : null };
+        tap = { x: e.clientX, y: e.clientY, id: e.pointerId, trk: trk ? trk.getAttribute('data-trk') : null, shift: e.shiftKey };
+        if (!pinch && (e.shiftKey || selMode) && !trk) {
+          // selecting: drag out a box instead of moving the map
+          var q0 = pt(e);
+          box = { id: e.pointerId, x0: q0.x, y0: q0.y, x1: q0.x, y1: q0.y, add: e.shiftKey || selMode, el: null };
+          try { svg.setPointerCapture(e.pointerId); } catch (err) {}
+          return;
+        }
         if (!pinch) { pan = { id: e.pointerId, x: e.clientX, y: e.clientY, cx: view.cx, cy: view.cy, u: 1 / (svg.getScreenCTM().a || 1), moved: false }; try { svg.setPointerCapture(e.pointerId); } catch (err) {} }
         return;
       }
@@ -3152,11 +3266,21 @@
       e.preventDefault();
       try { g.setPointerCapture(e.pointerId); } catch (err) {}
       var q = pt(e);
-      drag = { g: g, x0: q.x, y0: q.y, dx: 0, dy: 0, id: e.pointerId, px: e.clientX, py: e.clientY };
+      var did = g.getAttribute('data-drag');
+      var group = multiSel.indexOf(did) >= 0 && multiSel.length > 1 ? selGroups() : null;
+      drag = { g: g, x0: q.x, y0: q.y, dx: 0, dy: 0, id: e.pointerId, px: e.clientX, py: e.clientY, shift: e.shiftKey, group: group };
       g.classList.add('dragging');
-      g.parentNode.appendChild(g); // draw it on top while moving
+      if (!group) g.parentNode.appendChild(g); // draw it on top while moving
     });
     svg.addEventListener('pointermove', function (e) {
+      if (box && e.pointerId === box.id) {
+        var qb = pt(e); box.x1 = qb.x; box.y1 = qb.y;
+        if (!box.el) { box.el = document.createElementNS('http://www.w3.org/2000/svg', 'rect'); box.el.setAttribute('class', 'marquee'); svg.appendChild(box.el); }
+        box.el.setAttribute('x', Math.min(box.x0, box.x1)); box.el.setAttribute('y', Math.min(box.y0, box.y1));
+        box.el.setAttribute('width', Math.abs(box.x1 - box.x0)); box.el.setAttribute('height', Math.abs(box.y1 - box.y0));
+        box.el.setAttribute('stroke-width', 1.2 / (svg.getScreenCTM().a || 1));
+        return;
+      }
       if (pan && e.pointerId === pan.id && !pinch) {
         var mx = e.clientX - pan.x, my = e.clientY - pan.y;
         if (!pan.moved && Math.hypot(mx, my) < 4) return;
@@ -3168,6 +3292,11 @@
       if (!drag || e.pointerId !== drag.id) return;
       var q = pt(e);
       drag.dx = q.x - drag.x0; drag.dy = q.y - drag.y0;
+      if (drag.group) {
+        var tr = 'translate(' + drag.dx.toFixed(1) + ' ' + drag.dy.toFixed(1) + ')';
+        drag.group.forEach(function (gg) { gg.setAttribute('transform', tr); });
+        return;
+      }
       drag.g.setAttribute('transform', 'translate(' + drag.dx.toFixed(1) + ' ' + drag.dy.toFixed(1) + ')');
       var dp = drag.g.getAttribute('data-drag').split('|');
       if (dp[0] === 'wg' || dp[0] === 'hg') {
@@ -3189,6 +3318,23 @@
       }
     });
     function end(e) {
+      if (box && e.pointerId === box.id) {
+        var bx = box; box = null;
+        if (bx.el) bx.el.remove();
+        var x0 = Math.min(bx.x0, bx.x1), x1 = Math.max(bx.x0, bx.x1), y0 = Math.min(bx.y0, bx.y1), y1 = Math.max(bx.y0, bx.y1);
+        if (Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 4) { tap = null; multiSel = []; showSelection(svg); return; }
+        tap = null;
+        svg.querySelectorAll('g.drag[data-drag]').forEach(function (g) {
+          var id = g.getAttribute('data-drag');
+          if (!selectable(id) || multiSel.indexOf(id) >= 0) return;
+          var bb; try { bb = g.getBBox(); } catch (err) { return; }
+          var cx = bb.x + bb.width / 2, cy = bb.y + bb.height / 2;
+          if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) multiSel.push(id);
+        });
+        showSelection(svg);
+        if (multiSel.length) toast(multiSel.length + ' selected. Drag any of them to move them all');
+        return;
+      }
       if (pan && e.pointerId === pan.id) { var wasPan = pan.moved; pan = null; svg.classList.remove('panning'); if (wasPan) { tap = null; return; } }
       if (tap && e.pointerId === tap.id) {
         var tp = tap; tap = null;
@@ -3197,18 +3343,36 @@
         var at = pt(e);
         if (tp.trk) { var tk = tp.trk.split('|'); tapTrack(tk[0], Number(tk[1]), at); }
         else if (editRide) tapOpenMap(at);
-        else if (shapeSel || waterSel) { shapeSel = null; waterSel = null; render(); }
+        else if (shapeSel || waterSel) { shapeSel = null; waterSel = null; multiSel = []; render(); }
+        else if (multiSel.length) { multiSel = []; showSelection(svg); }
         return;
       }
       if (!drag || e.pointerId !== drag.id) return;
       var d = drag, parts = d.g.getAttribute('data-drag').split('|');
       drag = null;
       d.g.classList.remove('dragging');
-      if (Math.hypot(e.clientX - d.px, e.clientY - d.py) < 4) { d.g.removeAttribute('transform'); tapItem(parts, pt(e)); return; }
+      var did = d.g.getAttribute('data-drag');
+      if (Math.hypot(e.clientX - d.px, e.clientY - d.py) < 4) {
+        d.g.removeAttribute('transform');
+        if ((d.shift || selMode) && selectable(did)) {
+          // selecting: add it, or take it back out
+          var at = multiSel.indexOf(did);
+          if (at >= 0) multiSel.splice(at, 1); else multiSel.push(did);
+          showSelection(svg);
+          return;
+        }
+        if (multiSel.length) { multiSel = []; showSelection(svg); }
+        tapItem(parts, pt(e)); return;
+      }
+      if (d.group) { moveGroup(multiSel.map(function (id) { return id.split('|'); }), d.dx, d.dy); return; }
+      if (multiSel.length && !selMode && !d.shift) multiSel = [];
       moveItem(parts, d.dx, d.dy);
     }
     svg.addEventListener('pointerup', end);
-    svg.addEventListener('pointercancel', function () { if (drag) { drag.g.removeAttribute('transform'); drag.g.classList.remove('dragging'); drag = null; } });
+    svg.addEventListener('pointercancel', function () {
+      if (box) { if (box.el) box.el.remove(); box = null; }
+      if (drag) { (drag.group || [drag.g]).forEach(function (gg) { gg.removeAttribute('transform'); }); drag.g.classList.remove('dragging'); drag = null; }
+    });
   }
   function moveItem(parts, dx, dy) {
     if (parts[0] === 's') { stretchPoint(parts[1], Number(parts[2]), dx, dy); return; }
@@ -3241,8 +3405,44 @@
     followWater(plan(), inside, before);
     changed();
   }
+  // Move several selected things together (one undo step). A ride's track comes along when
+  // every one of its stations is selected.
+  function moveGroup(list, dx, dy) {
+    var Lm = toManual(plan()), LR = layoutCache.result, p = plan();
+    var inside = containedWater(p), before = snapPos(p), movedIds = [];
+    var stationIds = list.filter(function (q) { return q[0] === 'c' && findStation(p, q[1]); }).map(function (q) { return q[1]; });
+    var wholeRides = ridesOf(p).filter(function (rd) {
+      return rd.stations.length && rd.stations.every(function (st) { return stationIds.indexOf(st.id) >= 0; });
+    });
+    list.forEach(function (q) {
+      var kind = q[0], id = q[1];
+      if (kind === 'c') {
+        var stn = findStation(p, id);
+        if (stn) { stn.st.x += dx; stn.st.y += dy; return; }
+        var st = Lm.staff.filter(function (z) { return z.id === id; })[0], it = st || Lm.pos[id];
+        if (it) { it.x += dx; it.y += dy; movedIds.push(id); }
+      } else if (kind === 'p') {
+        var mine = Lm.plazas.filter(function (z) { return z.id === id; })[0];
+        if (mine) { mine.x += dx; mine.y += dy; }
+        else {
+          var auto = LR && LR.R.plazas.filter(function (z) { return z.id === id; })[0];
+          if (auto) Lm.plazas.push({ id: 'pl' + uid(), x: auto.x + dx, y: auto.y + dy });
+        }
+      } else if (kind === 'e' && Lm.ents[Number(id)]) { Lm.ents[Number(id)].x += dx; Lm.ents[Number(id)].y += dy; }
+    });
+    wholeRides.forEach(function (rd) { (rd.track || []).forEach(function (q) { if (!q.s) { q.x += dx; q.y += dy; } }); });
+    // stations of rides that only partly moved get nudged clear, the same as a single drag
+    stationIds.forEach(function (id) {
+      var stn = findStation(p, id);
+      if (stn && wholeRides.indexOf(stn.ride) < 0 && LR && LR.R) clearStation(stn.st, rideSpecs[stn.ride.type], LR.R.circles, stn.ride.type, LR);
+    });
+    if (movedIds.length) makeRoom(Lm, movedIds);
+    followWater(p, inside, before);
+    changed();
+  }
   // Push neighbours just far enough out of the way of something that was dropped on them.
   function makeRoom(Lm, movedId, movedPos) {
+    var movedList = Array.isArray(movedId) ? movedId : [movedId];
     var LR = layoutCache.result, S = L();
     if (!LR) return;
     var gap = S.P + 4, items = [], bumped = [];
@@ -3252,7 +3452,7 @@
       if (fs && (IN_HAB_OK[fs.ride.type] || onWaterAt(LR, fs.st.x, fs.st.y))) return; // allowed where it is: never bumped
       var ref = fs ? fs.st : c.type === 'staff' ? Lm.staff.filter(function (q) { return q.id === c.seed; })[0] : Lm.pos[c.seed];
       if (!ref) return;
-      var fixed = c.seed === movedId;
+      var fixed = movedList.indexOf(c.seed) >= 0;
       if (ref.shape && (c.type === 'habitat' || c.type === 'aquarium')) {
         var sp = shapeParts(0, 0, ref.shape);
         items.push({ r: sp.rin, ref: ref, ox: 0, oy: 0, fixed: fixed });

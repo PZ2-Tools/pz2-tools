@@ -57,6 +57,14 @@
   .suggest.open { display: block; }
   .suggest button { display: block; width: 100%; text-align: left; font: inherit; background: none; border: 0; padding: 8px 11px; cursor: pointer; color: var(--ink); }
   .suggest button:hover, .suggest button.active { background: var(--accent-soft); }
+  .suggest .count { display: flex; justify-content: space-between; gap: 10px; align-items: center; z-index: 1; }
+  .suggest .count .clear { display: inline; width: auto; padding: 0; color: var(--accent); font-weight: 700; font-size: 12.5px; text-decoration: underline; }
+  .suggest .count .clear:hover { background: none; }
+  .suggest button[data-key] { display: flex; align-items: center; gap: 9px; }
+  .suggest .tick { flex: 0 0 auto; width: 17px; height: 17px; border: 1.5px solid #9aa391; border-radius: 4px; background: #fff; display: grid; place-items: center; }
+  .suggest button[aria-selected="true"] .tick { background: var(--accent); border-color: var(--accent); }
+  .suggest button[aria-selected="true"] .tick::after { content: ""; width: 5px; height: 9px; border: solid #fff; border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
+  .suggest .inplan { margin-left: auto; font-size: 11.5px; color: var(--warn); background: var(--warn-soft); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
   .small { font-size: 12.5px; }
 
   .panel { display: grid; gap: 14px; }
@@ -196,11 +204,11 @@
       <h2>Add animals</h2>
       <div class="field picker" data-kind="habitat"><label for="add-habitat">Habitats <span class="hint">(includes aquariums and aviaries)</span></label>
         <div class="row"><input type="text" id="add-habitat" placeholder="Search animals…" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="suggest-habitat"><button type="button" class="primary" id="add-habitat-btn">Add</button></div>
-        <div class="suggest" id="suggest-habitat" role="listbox" aria-label="Matching habitat animals"></div>
+        <div class="suggest" id="suggest-habitat" role="listbox" aria-multiselectable="true" aria-label="Matching habitat animals"></div>
       </div>
       <div class="field picker" data-kind="exhibit"><label for="add-exhibit">Exhibits</label>
         <div class="row"><input type="text" id="add-exhibit" placeholder="Search animals…" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="suggest-exhibit"><button type="button" class="primary" id="add-exhibit-btn">Add</button></div>
-        <div class="suggest" id="suggest-exhibit" role="listbox" aria-label="Matching exhibit animals"></div>
+        <div class="suggest" id="suggest-exhibit" role="listbox" aria-multiselectable="true" aria-label="Matching exhibit animals"></div>
       </div>
       <label class="field"><span>Add to the map</span>
         <select id="add-facility"><option value="">Add a staff area, plaza or ride station…</option><option value="staff">Staff area</option><option value="plaza">Guest plaza</option></select>
@@ -3308,26 +3316,42 @@
     $('plan-del').disabled = state.plans.length < 2;
   }
   // Search boxes for adding animals (type to narrow the list, like the Habitat Planner).
-  function makePicker(kind, getList, onPick) {
-    var input = $('add-' + kind), box = $('suggest-' + kind), btn = $('add-' + kind + '-btn'), active = -1;
+  // Search box with tick boxes: tick several animals, then Add them all at once.
+  function makePicker(kind, getList, onPickMany, inPlan) {
+    var input = $('add-' + kind), box = $('suggest-' + kind), btn = $('add-' + kind + '-btn'), active = -1, ticked = [];
     function matches() { var q = norm(input.value); return getList().filter(function (a) { return !q || a.key.indexOf(q) >= 0; }); }
+    function label() { btn.textContent = ticked.length ? 'Add ' + ticked.length : 'Add'; }
     function show(open) {
       input.setAttribute('aria-expanded', open ? 'true' : 'false');
       if (!open) { box.classList.remove('open'); box.innerHTML = ''; return; }
-      var list = matches();
+      var list = matches(), have = inPlan();
       if (active >= list.length) active = list.length - 1;
-      box.innerHTML = !list.length ? '<div class="count">No matching animals</div>' :
-        '<div class="count">' + list.length + ' animal' + (list.length === 1 ? '' : 's') + '</div>' +
-        list.map(function (a, i) { return '<button type="button" role="option" data-key="' + esc(a.key) + '"' + (i === active ? ' class="active"' : '') + '>' + esc(a.name) + '</button>'; }).join('');
+      var head = (list.length ? list.length + ' animal' + (list.length === 1 ? '' : 's') : 'No matching animals') +
+        (ticked.length ? ' · ' + ticked.length + ' ticked' : '');
+      box.innerHTML = '<div class="count"><span>' + head + '</span>' +
+        (ticked.length ? '<button type="button" class="clear" data-clear="1">Clear</button>' : '') + '</div>' +
+        list.map(function (a, i) {
+          var on = ticked.indexOf(a.key) >= 0;
+          return '<button type="button" role="option" aria-selected="' + on + '" data-key="' + esc(a.key) + '"' + (i === active ? ' class="active"' : '') + '>' +
+            '<span class="tick" aria-hidden="true"></span><span>' + esc(a.name) + '</span>' +
+            (have[a.key] ? '<span class="inplan">already in plan</span>' : '') + '</button>';
+        }).join('');
       box.classList.add('open');
       var act = box.querySelector('button.active'); if (act) act.scrollIntoView({ block: 'nearest' });
     }
-    function pick(key) { input.value = ''; active = -1; show(false); onPick(key); }
+    function toggle(key) {
+      var i = ticked.indexOf(key);
+      if (i >= 0) ticked.splice(i, 1); else ticked.push(key);
+      label();
+      var top = box.scrollTop; show(true); box.scrollTop = top;
+    }
+    function finish(keys) { input.value = ''; active = -1; ticked = []; label(); show(false); onPickMany(keys); }
     function fromInput() {
+      if (ticked.length) return finish(ticked.slice());
       var q = norm(input.value); if (!q) { show(true); input.focus(); return; }
       var list = matches(), exact = list.filter(function (a) { return a.key === q; })[0];
       var a = exact || (active >= 0 ? list[active] : list[0]);
-      if (a) pick(a.key);
+      if (a) finish([a.key]);
     }
     input.addEventListener('input', function () { active = -1; show(true); });
     input.addEventListener('focus', function () { show(true); });
@@ -3338,13 +3362,25 @@
       else if (e.key === 'Enter') { fromInput(); e.preventDefault(); }
       else if (e.key === 'Escape') { show(false); }
     });
-    box.addEventListener('mousedown', function (e) { var b = e.target.closest('button[data-key]'); if (b) { e.preventDefault(); pick(b.getAttribute('data-key')); } });
+    box.addEventListener('mousedown', function (e) {
+      if (e.target.closest('[data-clear]')) { e.preventDefault(); ticked = []; label(); show(true); return; }
+      var b = e.target.closest('button[data-key]'); if (b) { e.preventDefault(); toggle(b.getAttribute('data-key')); }
+    });
+    box.addEventListener('click', function (e) { // keyboard (Tab to an option, then Space/Enter)
+      if (e.detail !== 0) return;
+      if (e.target.closest('[data-clear]')) { ticked = []; label(); show(true); return; }
+      var b = e.target.closest('button[data-key]'); if (b) { var k = b.getAttribute('data-key'); toggle(k); var again = box.querySelector('button[data-key="' + k + '"]'); if (again) again.focus(); }
+    });
     btn.addEventListener('click', fromInput);
     document.addEventListener('click', function (e) { if (!e.target.closest('.picker[data-kind="' + kind + '"]')) show(false); });
   }
   function fillAddLists() {
-    makePicker('habitat', function () { return model.pickable; }, addHabitatAnimal);
-    makePicker('exhibit', function () { return exhibitAnimals; }, addExhibitAnimal);
+    makePicker('habitat', function () { return model.pickable; }, addHabitatAnimals, function () {
+      var have = {}; plan().habitats.forEach(function (h) { h.members.forEach(function (m) { have[m.key] = 1; }); }); return have;
+    });
+    makePicker('exhibit', function () { return exhibitAnimals; }, addExhibitAnimals, function () {
+      var have = {}; plan().exhibits.forEach(function (e) { if (e.key) have[e.key] = 1; (e.members || []).forEach(function (m) { have[m.key] = 1; }); }); return have;
+    });
   }
 
   // ---------- actions ----------
@@ -3438,20 +3474,30 @@
     $('set-entrances').addEventListener('change', function () { plan().setup.entrances = this.value === 'auto' ? 'auto' : Number(this.value); changed(); });
 
   }
-  function addHabitatAnimal(k) {
+  function addHabitatAnimal(k) { addHabitatAnimals([k]); }
+  function addHabitatAnimals(keys) {
+    if (!keys.length) return;
+    keys.forEach(function (k) {
       plan().habitats.push({ id: uid(), members: [{ key: k, n: null }], manual: false, imported: null, theme: {} });
       autoPair();
-      changed();
-      var h = plan().habitats.filter(function (x) { return x.members.some(function (m) { return m.key === k; }); }).pop();
-      toast(nameOf(k) + (h && h.members.length > 1 ? ' added, sharing with ' + keysOf(h.members).filter(function (x) { return x !== k; }).map(nameOf).join(', ') : ' added'));
+    });
+    changed();
+    var shared = plan().habitats.filter(function (h) {
+      return h.members.length > 1 && h.members.some(function (m) { return keys.indexOf(m.key) >= 0; });
+    }).map(function (h) { return keysOf(h.members).map(nameOf).join(' + '); });
+    if (keys.length === 1) {
+      var k = keys[0], h = plan().habitats.filter(function (x) { return x.members.some(function (m) { return m.key === k; }); }).pop();
+      return toast(nameOf(k) + (h && h.members.length > 1 ? ' added, sharing with ' + keysOf(h.members).filter(function (x) { return x !== k; }).map(nameOf).join(', ') : ' added'));
+    }
+    toast(keys.length + ' animals added' + (shared.length ? '. Sharing: ' + shared.join('; ') : ''));
   }
   function isWalk(k) { return model.animals[k].types.some(function (t) { return /walkthrough/i.test(t); }); }
-  function addExhibitAnimal(k) {
+  function addExhibitAnimal(k) { addExhibitAnimals([k]); }
+  function addExhibitOne(k) {
     var p = plan();
     if (!isWalk(k)) {
       p.exhibits.push({ id: uid(), key: k, theme: {} });
-      changed();
-      return toast(nameOf(k) + ' exhibit added');
+      return nameOf(k) + ' exhibit added';
     }
     // Walkthroughs hold several swarms: add 1 swarm to one that has room.
     var max = walkMax(), walks = p.exhibits.filter(function (e) { return e.walk; });
@@ -3461,8 +3507,13 @@
     if (same) { same.members.forEach(function (m) { if (m.key === k) m.n = (m.n || 1) + 1; }); }
     else if (target) target.members.push({ key: k, n: 1 });
     else p.exhibits.push(target = { id: uid(), walk: true, members: [{ key: k, n: 1 }], theme: {} });
+    return nameOf(k) + ' added to a walkthrough (' + swarms(target) + ' of ' + max + ' swarms)';
+  }
+  function addExhibitAnimals(keys) {
+    if (!keys.length) return;
+    var msgs = keys.map(addExhibitOne);
     changed();
-    toast(nameOf(k) + ' added to a walkthrough (' + swarms(target) + ' of ' + max + ' swarms)');
+    toast(keys.length === 1 ? msgs[0] : keys.length + ' exhibit animals added');
   }
   function wirePanel() {
 

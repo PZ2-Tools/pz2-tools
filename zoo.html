@@ -947,6 +947,7 @@
     var byTheme = baseItems(units, themeNames);
     var packed = packAll(byTheme, themeNames, S, more, R_VARIANT), circles = packed.circles;
     rimStaff(circles, S);
+    pruneStaff(circles, S);
     return finish(circles, packed.clusters, S, nEnt, null);
   }
   // Paths, staff check and entrances for enclosures that are already in place.
@@ -1103,6 +1104,31 @@
     }
     return circles.reduce(function (m, c) { return m + boxOverlap(pz, c); }, 0);
   }
+  // name the habitats that have no staff area within reach
+  function staffIssue(R, S, issues) {
+    var seeds = R.problems.filter(function (q) { return q.kind === 'staff'; }).map(function (q) { return q.seed; });
+    if (!seeds.length) return;
+    var nums = R.circles.filter(function (c) { return seeds.indexOf(c.seed) >= 0 && c.unit && c.unit.num; })
+      .map(function (c) { return c.unit.num; }).sort(function (a, b) { return a - b; });
+    var who = nums.length === 1 ? 'Habitat ' + nums[0] + ' is' : nums.length ? 'Habitats ' + nums.slice(0, -1).join(', ') + ' and ' + nums[nums.length - 1] + ' are' : 'Some habitats are';
+    issues.push(who + ' more than ' + S.staffMax + ' m from a staff area. Add one with “Add to the map”, or move things closer.');
+  }
+  // take away staff areas that no habitat needs (every habitat still has one within reach)
+  function pruneStaff(circles, S) {
+    var habs = circles.filter(function (c) { return c.type === 'habitat' || c.type === 'aquarium'; });
+    var staff = circles.filter(function (c) { return c.type === 'staff'; });
+    var reach = staff.map(function (s) { return habs.filter(function (h) { return habGap(s, h) <= S.staffMax; }); });
+    var count = habs.map(function (h) { return staff.filter(function (s, i) { return reach[i].indexOf(h) >= 0; }).length; });
+    var gone = [];
+    // the ones covering the fewest habitats go first
+    staff.map(function (s, i) { return i; }).sort(function (a, b) { return reach[a].length - reach[b].length; }).forEach(function (i) {
+      var needed = reach[i].some(function (h) { return count[habs.indexOf(h)] <= 1; });
+      if (needed) return;
+      reach[i].forEach(function (h) { count[habs.indexOf(h)]--; });
+      gone.push(staff[i]);
+    });
+    for (var k = circles.length - 1; k >= 0; k--) if (gone.indexOf(circles[k]) >= 0) circles.splice(k, 1);
+  }
   function mapFit(bb, S, issues) {
     if (!(bb.w > S.map || bb.h > S.map)) return;
     var over = [];
@@ -1156,7 +1182,7 @@
       if (!R.plazas.some(function (q) { return rectCircleGap(box, { x: q.x, y: q.y, r: q.w / 2 }) <= S.entPlaza; })) R.problems.push({ kind: 'entrance', i: i });
     });
     var issues = [];
-    if (R.problems.some(function (q) { return q.kind === 'staff'; })) issues.push('Some habitats are more than ' + S.staffMax + ' m from a staff area.');
+    staffIssue(R, S, issues);
     if (R.problems.some(function (q) { return q.kind === 'entrance'; })) issues.push('An entrance doesn’t have a plaza within ' + S.entPlaza + ' m.');
     var habs = R.circles.filter(function (c) { return c.type === 'habitat' || c.type === 'aquarium'; });
     R.ents.forEach(function (e, i) {
@@ -1229,20 +1255,14 @@
       return { theme: t, x: x, y: y, r: r };
     }).filter(Boolean);
     var R = finish(circles, clusters, S, nEnt, Lm.ents);
-    if (R.problems.some(function (q) { return q.kind === 'staff'; })) {
-      // a move left a habitat too far from staff: add staff areas where they reach the most
-      var before = circles.length;
-      rimStaff(circles, S);
-      circles.slice(before).forEach(function (c) { c.seed = 'st' + uid(); Lm.staff.push({ id: c.seed, x: c.x, y: c.y }); });
-      if (circles.length > before) { placedNew = true; R = finish(circles, clusters, S, nEnt, Lm.ents); }
-    }
+    // (a habitat left without a staff area in reach is only warned about: the player decides)
     if (!Lm.ents || Lm.ents.length !== nEnt) { Lm.ents = R.ents.map(function (e) { return { x: e.cx, y: e.cy }; }); placedNew = true; }
     placePlazas(R, S, Lm.plazas || []);
     if (!Lm.water) { Lm.water = []; placedNew = true; }
     if (settleWater(p, true)) placedNew = true; // new habitats get their starting lake
     if (placedNew) save();
     var issues = [];
-    if (R.problems.some(function (q) { return q.kind === 'staff'; })) issues.push('Some habitats are more than ' + S.staffMax + ' m from a staff area.');
+    staffIssue(R, S, issues);
     var res = { R: R, S: S, nEnt: nEnt, auto: false, manual: true, issues: issues, bb: circleBounds(R.circles, R.ents, 18), water: Lm.water || [] };
     mapFit(res.bb, S, issues);
     window.PZ_ZOO_LAYOUT = res;

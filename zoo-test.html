@@ -220,7 +220,7 @@
         <div class="suggest" id="suggest-exhibit" role="listbox" aria-multiselectable="true" aria-label="Matching exhibit animals"></div>
       </div>
       <label class="field"><span>Add to the map</span>
-        <select id="add-facility"><option value="">Add a staff area, plaza or ride station…</option><option value="staff">Staff area</option><option value="plaza">Guest plaza</option></select>
+        <select id="add-facility"><option value="">Add a staff area, plaza or ride station…</option><option value="staff">Staff area</option><option value="plaza">Guest plaza</option><option value="restaurant">Restaurant (25 × 40 m)</option></select>
       </label>
       <p class="muted small" style="margin:0">Drag anything on the map to move it; the paths follow. Tap a habitat or water to change its shape. Tap a staff area, plaza or ride station to remove it. Habitats are sized for each animal's group size, with every thrive need met, plus extra space. Leave a group size blank to use the largest group allowed automatically (shown in grey).</p>
     </section>
@@ -989,7 +989,7 @@
     }
   }
   // staff areas and ride stations: blocks that paths go round but don't need to pass
-  function isBack(c) { return c.type === 'staff' || c.type === 'station' || c.type === 'part'; }
+  function isBack(c) { return c.type === 'staff' || c.type === 'station' || c.type === 'part' || c.type === 'rest'; }
   // gap from a staff area (or anything round) to a habitat, using a stretched habitat's real outline
   function habGap(a, h) { var g = gapBetween(a, h); (h.parts || []).forEach(function (q) { g = Math.min(g, gapBetween(a, q)); }); return g; }
   function gapBetween(a, b) { return Math.hypot(a.x - b.x, a.y - b.y) - a.r - b.r; }
@@ -1261,6 +1261,10 @@
     (Lm.staff || []).forEach(function (st) {
       circles.push({ type: 'staff', x: st.x, y: st.y, r: sr, A: S.staffW * S.staffD, theme: null, cluster: -1, seed: st.id, label: 'Staff', short: 'S', title: 'Staff area (keeper huts and other staff buildings)' });
     });
+    // restaurants: the player's own add-on, a block paths go round (plaza spacing ignores them)
+    (Lm.rests || []).forEach(function (q) {
+      circles.push({ type: 'rest', x: q.x, y: q.y, r: Math.hypot(REST_W, REST_D) / 2, A: REST_W * REST_D, theme: null, cluster: -1, seed: q.id, w: REST_W, d: REST_D, title: 'Restaurant (' + REST_W + ' × ' + REST_D + ' m)' });
+    });
     // ride stations: blocks that paths go round, like staff areas
     ridesOf(p).forEach(function (rd) {
       var sp = rideSpecs[rd.type];
@@ -1334,7 +1338,7 @@
     var LR = layoutCache.result;
     var Lm = { manual: true, pos: {}, staff: [], plazas: [], ents: [], water: LR && LR.water ? JSON.parse(JSON.stringify(LR.water)) : [] };
     if (LR && LR.R) {
-      LR.R.circles.forEach(function (c) { if (c.type === 'station') return; if (c.type === 'staff') Lm.staff.push({ id: c.seed, x: c.x, y: c.y }); else Lm.pos[c.seed] = { x: c.x, y: c.y }; });
+      LR.R.circles.forEach(function (c) { if (c.type === 'station' || c.type === 'rest') return; if (c.type === 'staff') Lm.staff.push({ id: c.seed, x: c.x, y: c.y }); else Lm.pos[c.seed] = { x: c.x, y: c.y }; });
       LR.R.plazas.forEach(function (q) { if (q.mine) Lm.plazas.push({ id: q.id, x: q.x, y: q.y }); });
       LR.R.ents.forEach(function (e) { Lm.ents.push({ x: e.cx, y: e.cy }); });
     }
@@ -1632,7 +1636,7 @@
   function facilityOptions() {
     var p = plan(), sel = $('add-facility');
     if (!sel) return;
-    var html = '<option value="">Add a staff area, plaza, ride station or water…</option><option value="staff">Staff area</option><option value="plaza">Guest plaza</option><optgroup label="Ride station">';
+    var html = '<option value="">Add a staff area, plaza, restaurant, ride station or water…</option><option value="staff">Staff area</option><option value="plaza">Guest plaza</option><option value="restaurant">Restaurant (25 × 40 m)</option><optgroup label="Ride station">';
     ridesOf(p).forEach(function (rd) { html += '<option value="st:' + esc(rd.id) + '">Station for ' + esc(rd.name) + '</option>'; });
     BUILT_RIDES.forEach(function (t) { html += '<option value="new:' + t + '">New ' + esc(rideSpecs[t].name.toLowerCase()) + '</option>'; });
     sel.innerHTML = html + '</optgroup><optgroup label="Water"><option value="water:lake">Lake</option><option value="water:river">River</option></optgroup>';
@@ -1758,6 +1762,8 @@
   // several things selected on the map, to move together (Shift+click, or the Select button)
   var multiSel = [], selMode = false;
   function selectable(dragId) { var k = dragId.split('|')[0]; return k === 'c' || k === 'p' || k === 'e'; }
+  // a habitat's move grip stands in for the habitat itself
+  function selId(dragId) { var k = dragId.split('|'); return k[0] === 'hg' ? 'c|' + k[1] : dragId; }
   function showSelection(svg) {
     svg.querySelectorAll('g.selected').forEach(function (g) { g.classList.remove('selected'); });
     multiSel = multiSel.filter(function (id) {
@@ -1811,6 +1817,7 @@
     if (hasStations(p)) w.push('your transport rides');
     if (hasShapes(p)) w.push('your habitat shapes');
     if (hasWaterEdits(p)) w.push('your lake and river changes');
+    if (p.layout && p.layout.rests && p.layout.rests.length) w.push('your restaurants');
     return w.length > 1 ? w.slice(0, -1).join(', ') + ' and ' + w[w.length - 1] : w.join('');
   }
   function stretchPoint(seed, k, dx, dy) {
@@ -2353,6 +2360,7 @@
       if (o.type === 'aquarium') poly(outlineSamples(o.shape || defaultShape(o.seed, Math.sqrt(o.A / Math.PI)), 4).map(function (q) { return { x: o.x + q.x, y: o.y + q.y }; }), CELL_AQUA);
       else if (o.type === 'exhibits' || o.type === 'walk') rect(o.x, o.y, o.bw, o.bd, CELL_EXH);
       else if (o.type === 'staff') rect(o.x, o.y, S.staffW, S.staffD, CELL_SOFT);
+      else if (o.type === 'rest') rect(o.x, o.y, REST_W, REST_D, CELL_SOFT);
       else if (o.type === 'station') rect(o.x, o.y, o.w, o.d, CELL_SOFT);
     });
     (R.plazas || []).forEach(function (q) { rect(q.x, q.y, q.w, q.d, CELL_SOFT); });
@@ -2926,7 +2934,7 @@
     }
     R.circles.forEach(function (c) {
       if (c.type === 'station' || c.type === 'part') return;
-      var g = '<g class="drag" data-drag="c|' + esc(c.seed) + '"><title>' + esc((c.title || '') + (c.type === 'aquarium' && c.r > c.D ? '. Viewing tunnel: guests can’t see the middle of this aquarium from its edge' : '')) + (c.type === 'staff' ? ' (drag to move, tap to remove)' : c.type === 'habitat' || c.type === 'aquarium' ? ' (drag to move, tap to change its shape)' : ' (drag to move)') + '</title>';
+      var g = '<g class="drag" data-drag="c|' + esc(c.seed) + '"><title>' + esc((c.title || '') + (c.type === 'aquarium' && c.r > c.D ? '. Viewing tunnel: guests can’t see the middle of this aquarium from its edge' : '')) + (c.type === 'staff' || c.type === 'rest' ? ' (drag to move, tap to remove)' : c.type === 'habitat' || c.type === 'aquarium' ? ' (drag to move, tap to change its shape)' : ' (drag to move)') + '</title>';
       if (c.type === 'habitat') { g += shape(c, 0, colorOf[c.theme], ' stroke="#4f5f47" stroke-width="0.9" data-shape="' + esc(c.seed) + '"'); labelSvg += label(c, c.short, '#1f2b1c'); }
       else if (c.type === 'aquarium') {
         g += shape(c, 0, '#9ccbe3', ' stroke="#2f6680" stroke-width="1.1" data-shape="' + esc(c.seed) + '"');
@@ -2936,6 +2944,10 @@
       else if (c.type === 'walk') g += rectFor(c, c.bw, c.bd, colorOf[c.theme], '#4f5f47', ' stroke-dasharray="3 2"') + label(c, c.short, '#1f2b1c');
       else if (c.type === 'exhibits') g += rectFor(c, c.bw, c.bd, '#ece6d8', '#8a826f', '') + label(c, c.count + (c.count === 1 ? ' exhibit' : ' exhibits'), '#4a4436');
       else if (c.type === 'staff') g += box(c, S.staffW, S.staffD, '#9b8db3', '#6c5e85', 'Staff', '#fff');
+      else if (c.type === 'rest') {
+        g += '<rect x="' + f1(c.x - REST_W / 2) + '" y="' + f1(c.y - REST_D / 2) + '" width="' + REST_W + '" height="' + REST_D + '" rx="3" fill="#d9825b" stroke="#9a4f2f" stroke-width="0.8"/>' +
+          '<text x="' + f1(c.x) + '" y="' + f1(c.y) + '" font-size="5" fill="#fff" text-anchor="middle" dominant-baseline="central" transform="rotate(-90 ' + f1(c.x) + ' ' + f1(c.y) + ')">Restaurant</text>';
+      }
       svg += g + '</g>';
     });
     // water: edges first, then fills on top, so overlapping water reads as one
@@ -3024,7 +3036,7 @@
     var avoid = [];
     tracks.forEach(function (t) { t.segs.forEach(function (g) { for (var k = 0; k <= 4; k++) { var q = bezAt(g.b, k / 4); avoid.push({ x: q.x - 4, y: q.y - 4, w: 8, h: 8, k: 4 }); } }); });
     R.circles.forEach(function (c) { if (c.type === 'station') avoid.push({ x: c.x - c.w / 2, y: c.y - c.d / 2, w: c.w, h: c.d, k: 8 }); });
-    R.circles.forEach(function (c) { if (c.type === 'staff') avoid.push({ x: c.x - S.staffW / 2, y: c.y - S.staffD / 2, w: S.staffW, h: S.staffD, k: 8 }); });
+    R.circles.forEach(function (c) { if (c.type === 'staff') avoid.push({ x: c.x - S.staffW / 2, y: c.y - S.staffD / 2, w: S.staffW, h: S.staffD, k: 8 }); if (c.type === 'rest') avoid.push({ x: c.x - REST_W / 2, y: c.y - REST_D / 2, w: REST_W, h: REST_D, k: 8 }); });
     R.plazas.forEach(function (pz) { avoid.push({ x: pz.x - S.plazaW / 2, y: pz.y - S.plazaD / 2, w: S.plazaW, h: S.plazaD, k: 8 }); });
     R.ents.forEach(function (e) { avoid.push({ x: e.x, y: e.y, w: e.w, h: e.d, k: 8 }); });
     R.circles.forEach(function (c) {
@@ -3087,6 +3099,7 @@
       '<span class="lg"><i style="background:#f0b46a"></i>Plaza</span><span class="lg"><i style="background:#9b8db3"></i>Staff area</span>' +
       '<span class="lg"><i style="background:#3d6a47"></i>Entrance</span><span class="lg"><i style="background:#d9c79e"></i>Path</span>';
     var nPl = R.plazas.length, nSt = R.circles.filter(function (c) { return c.type === 'staff'; }).length;
+    if (R.circles.some(function (c) { return c.type === 'rest'; })) legend += '<span class="lg"><i style="background:#d9825b;border-color:#9a4f2f"></i>Restaurant</span>';
     if (tunnels) legend += '<span class="lg"><i style="background:#e4f3fa;border-color:#2f6680;border-style:dashed"></i>Viewing tunnel</span>';
     if (W.length) legend += '<span class="lg"><i style="background:' + WATER_FILL + ';border-color:' + WATER_EDGE + '"></i>Water</span>';
     ridesOf(p).forEach(function (rd) { legend += '<span class="lg"' + (rd.hidden ? ' style="opacity:.5"' : '') + '><i style="background:' + rd.color + '"></i>' + esc(rd.name) + (rd.hidden ? ' (hidden)' : '') + '</span>'; });
@@ -3214,7 +3227,14 @@
         multiSel = []; var m = document.querySelector('#panel .zoo-map'); if (m) showSelection(m);
       });
     }
-    function selGroups() { return multiSel.map(function (id) { return svg.querySelector('g.drag[data-drag="' + id.replace(/"/g, '\\"') + '"]'); }).filter(Boolean); }
+    function selGroups() {
+      var out = [];
+      multiSel.forEach(function (id) {
+        var q = id.replace(/"/g, '\\"');
+        [svg.querySelector('g.drag[data-drag="' + q + '"]'), svg.querySelector('g.drag[data-drag="h' + (id.charAt(0) === 'c' ? 'g' + q.slice(1) : '-') + '"]')].forEach(function (g) { if (g) out.push(g); });
+      });
+      return out;
+    }
     svg.addEventListener('wheel', function (e) {
       e.preventDefault();
       var q = pt(e);
@@ -3266,7 +3286,7 @@
       e.preventDefault();
       try { g.setPointerCapture(e.pointerId); } catch (err) {}
       var q = pt(e);
-      var did = g.getAttribute('data-drag');
+      var did = selId(g.getAttribute('data-drag'));
       var group = multiSel.indexOf(did) >= 0 && multiSel.length > 1 ? selGroups() : null;
       drag = { g: g, x0: q.x, y0: q.y, dx: 0, dy: 0, id: e.pointerId, px: e.clientX, py: e.clientY, shift: e.shiftKey, group: group };
       g.classList.add('dragging');
@@ -3351,9 +3371,10 @@
       var d = drag, parts = d.g.getAttribute('data-drag').split('|');
       drag = null;
       d.g.classList.remove('dragging');
-      var did = d.g.getAttribute('data-drag');
+      var did = selId(d.g.getAttribute('data-drag'));
       if (Math.hypot(e.clientX - d.px, e.clientY - d.py) < 4) {
         d.g.removeAttribute('transform');
+        if ((d.shift || selMode) && parts[0] === 's') did = 'c|' + parts[1]; // a shape dot stands in for its habitat here
         if ((d.shift || selMode) && selectable(did)) {
           // selecting: add it, or take it back out
           var at = multiSel.indexOf(did);
@@ -3390,7 +3411,7 @@
       var rdb = findRide(plan(), id), q = rdb && rdb.track && rdb.track[Number(parts[2])];
       if (q && !q.s) { q.x += dx; q.y += dy; }
     } else if (kind === 'c') {
-      var st = Lm.staff.filter(function (q) { return q.id === id; })[0];
+      var st = Lm.staff.filter(function (q) { return q.id === id; })[0] || (Lm.rests || []).filter(function (q) { return q.id === id; })[0];
       var it = st || Lm.pos[id];
       if (it) { it.x += dx; it.y += dy; makeRoom(Lm, id, it); }
     } else if (kind === 'p') {
@@ -3419,7 +3440,7 @@
       if (kind === 'c') {
         var stn = findStation(p, id);
         if (stn) { stn.st.x += dx; stn.st.y += dy; return; }
-        var st = Lm.staff.filter(function (z) { return z.id === id; })[0], it = st || Lm.pos[id];
+        var st = Lm.staff.filter(function (z) { return z.id === id; })[0] || (Lm.rests || []).filter(function (z) { return z.id === id; })[0], it = st || Lm.pos[id];
         if (it) { it.x += dx; it.y += dy; movedIds.push(id); }
       } else if (kind === 'p') {
         var mine = Lm.plazas.filter(function (z) { return z.id === id; })[0];
@@ -3450,7 +3471,7 @@
       if (c.type === 'part') return;
       var fs = c.type === 'station' && findStation(plan(), c.seed);
       if (fs && (IN_HAB_OK[fs.ride.type] || onWaterAt(LR, fs.st.x, fs.st.y))) return; // allowed where it is: never bumped
-      var ref = fs ? fs.st : c.type === 'staff' ? Lm.staff.filter(function (q) { return q.id === c.seed; })[0] : Lm.pos[c.seed];
+      var ref = fs ? fs.st : c.type === 'staff' ? Lm.staff.filter(function (q) { return q.id === c.seed; })[0] : c.type === 'rest' ? (Lm.rests || []).filter(function (q) { return q.id === c.seed; })[0] : Lm.pos[c.seed];
       if (!ref) return;
       var fixed = movedList.indexOf(c.seed) >= 0;
       if (ref.shape && (c.type === 'habitat' || c.type === 'aquarium')) {
@@ -3511,6 +3532,11 @@
       if (!window.confirm('Remove this plaza?')) return;
       Lm0.plazas = Lm0.plazas.filter(function (q) { return q.id !== id; });
       changed();
+    } else if (kind === 'c' && LR && LR.R.circles.some(function (c) { return c.seed === id && c.type === 'rest'; })) {
+      if (!window.confirm('Remove this restaurant?')) return;
+      var Lr = toManual(plan());
+      Lr.rests = (Lr.rests || []).filter(function (q) { return q.id !== id; });
+      changed();
     } else if (isStaff) {
       if (!window.confirm('Remove this staff area?')) return;
       var Lm = toManual(plan());
@@ -3518,11 +3544,12 @@
       changed();
     }
   }
+  var REST_W = 25, REST_D = 40; // restaurant footprint (m)
   function addToMap(kind) {
     var Lm = toManual(plan()), LR = layoutCache.result, S = L();
     var obstacles = LR && LR.R ? LR.R.circles.map(function (c) { return { x: c.x, y: c.y, r: c.r }; }) : [];
     (LR && LR.R ? LR.R.plazas : []).forEach(function (q) { obstacles.push({ x: q.x, y: q.y, r: q.w * 0.7 }); });
-    var r = kind === 'staff' ? Math.hypot(S.staffW, S.staffD) / 2 : Math.hypot(S.plazaW, S.plazaD) / 2;
+    var r = kind === 'staff' ? Math.hypot(S.staffW, S.staffD) / 2 : kind === 'restaurant' ? Math.hypot(REST_W, REST_D) / 2 : Math.hypot(S.plazaW, S.plazaD) / 2;
     // drop it just off the right-hand side of the zoo, so it's easy to spot; stack new ones downward
     var right = -Infinity, top = Infinity, bottom = -Infinity;
     obstacles.forEach(function (o) { right = Math.max(right, o.x + o.r); top = Math.min(top, o.y - o.r); bottom = Math.max(bottom, o.y + o.r); });
@@ -3531,9 +3558,10 @@
     var spot = { x: right + r + 25, y: top + r };
     for (var k = 0; k < 40 && obstacles.some(function (o) { return Math.hypot(o.x - spot.x, o.y - spot.y) < o.r + r + 6; }); k++) spot.y += r * 2 + 6;
     if (kind === 'staff') Lm.staff.push({ id: 'st' + uid(), x: spot.x, y: spot.y });
+    else if (kind === 'restaurant') (Lm.rests = Lm.rests || []).push({ id: 'rs' + uid(), x: spot.x, y: spot.y });
     else Lm.plazas.push({ id: 'pl' + uid(), x: spot.x, y: spot.y });
     changed();
-    toast((kind === 'staff' ? 'Staff area' : 'Plaza') + ' added. Drag it where you want it');
+    toast((kind === 'staff' ? 'Staff area' : kind === 'restaurant' ? 'Restaurant' : 'Plaza') + ' added. Drag it where you want it');
   }
   function stat(n, l) { return '<div class="stat"><div class="n">' + n + '</div><div class="l">' + esc(l) + '</div></div>'; }
 

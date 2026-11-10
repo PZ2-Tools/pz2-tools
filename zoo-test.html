@@ -1263,7 +1263,7 @@
     });
     // restaurants: the player's own add-on, a block paths go round (plaza spacing ignores them)
     (Lm.rests || []).forEach(function (q) {
-      circles.push({ type: 'rest', x: q.x, y: q.y, r: Math.hypot(REST_W, REST_D) / 2, A: REST_W * REST_D, theme: null, cluster: -1, seed: q.id, w: REST_W, d: REST_D, title: 'Restaurant (' + REST_W + ' × ' + REST_D + ' m)' });
+      circles.push({ type: 'rest', x: q.x, y: q.y, rot: q.rot || 0, r: Math.hypot(REST_W, REST_D) / 2, A: REST_W * REST_D, theme: null, cluster: -1, seed: q.id, w: REST_W, d: REST_D, title: 'Restaurant (' + REST_W + ' × ' + REST_D + ' m)' });
     });
     // ride stations: blocks that paths go round, like staff areas
     ridesOf(p).forEach(function (rd) {
@@ -2360,7 +2360,7 @@
       if (o.type === 'aquarium') poly(outlineSamples(o.shape || defaultShape(o.seed, Math.sqrt(o.A / Math.PI)), 4).map(function (q) { return { x: o.x + q.x, y: o.y + q.y }; }), CELL_AQUA);
       else if (o.type === 'exhibits' || o.type === 'walk') rect(o.x, o.y, o.bw, o.bd, CELL_EXH);
       else if (o.type === 'staff') rect(o.x, o.y, S.staffW, S.staffD, CELL_SOFT);
-      else if (o.type === 'rest') rect(o.x, o.y, REST_W, REST_D, CELL_SOFT);
+      else if (o.type === 'rest') poly(restCorners(o.x, o.y, o.rot), CELL_SOFT);
       else if (o.type === 'station') rect(o.x, o.y, o.w, o.d, CELL_SOFT);
     });
     (R.plazas || []).forEach(function (q) { rect(q.x, q.y, q.w, q.d, CELL_SOFT); });
@@ -2912,7 +2912,7 @@
     }
     // Viewing tunnel: guests can't see the middle of a big aquarium from its edge, so a walkway
     // runs through it, joined at both ends to the nearest paths.
-    var tunnels = 0;
+    var tunnels = 0, restHandle = '';
     function tunnelSvg(c) {
       var nA = c.tunnel ? R.net.nodes[c.tunnel.a] : null, nB = c.tunnel ? R.net.nodes[c.tunnel.b] : null;
       var edge = function (n, fx, fy) {
@@ -2945,8 +2945,14 @@
       else if (c.type === 'exhibits') g += rectFor(c, c.bw, c.bd, '#ece6d8', '#8a826f', '') + label(c, c.count + (c.count === 1 ? ' exhibit' : ' exhibits'), '#4a4436');
       else if (c.type === 'staff') g += box(c, S.staffW, S.staffD, '#9b8db3', '#6c5e85', 'Staff', '#fff');
       else if (c.type === 'rest') {
-        g += '<rect x="' + f1(c.x - REST_W / 2) + '" y="' + f1(c.y - REST_D / 2) + '" width="' + REST_W + '" height="' + REST_D + '" rx="3" fill="#d9825b" stroke="#9a4f2f" stroke-width="0.8"/>' +
-          '<text x="' + f1(c.x) + '" y="' + f1(c.y) + '" font-size="5" fill="#fff" text-anchor="middle" dominant-baseline="central" transform="rotate(-90 ' + f1(c.x) + ' ' + f1(c.y) + ')">Restaurant</text>';
+        g += '<g data-rest="' + esc(c.seed) + '" transform="rotate(' + f1(c.rot || 0) + ' ' + f1(c.x) + ' ' + f1(c.y) + ')"><rect x="' + f1(c.x - REST_W / 2) + '" y="' + f1(c.y - REST_D / 2) + '" width="' + REST_W + '" height="' + REST_D + '" rx="3" fill="#d9825b" stroke="' + (restSel === c.seed ? '#22301f' : '#9a4f2f') + '" stroke-width="' + (restSel === c.seed ? 1.6 : 0.8) + '"/>' +
+          '<text x="' + f1(c.x) + '" y="' + f1(c.y) + '" font-size="5" fill="#fff" text-anchor="middle" dominant-baseline="central" transform="rotate(' + (((((c.rot || 0) - 90) % 360) + 360) % 360 > 90 && ((((c.rot || 0) - 90) % 360) + 360) % 360 < 270 ? 90 : -90) + ' ' + f1(c.x) + ' ' + f1(c.y) + ')">Restaurant</text></g>';
+        if (restSel === c.seed) {
+          // turn handle off the far end, along the long side
+          var ra = (c.rot || 0) * Math.PI / 180, hl = REST_D / 2 + 9;
+          restHandle = '<g class="drag grip" data-drag="rr|' + esc(c.seed) + '"><title>Drag to turn the restaurant</title><line x1="' + f1(c.x) + '" y1="' + f1(c.y) + '" x2="' + f1(c.x - Math.sin(ra) * hl) + '" y2="' + f1(c.y + Math.cos(ra) * hl) + '" stroke="#22301f" stroke-width="0.6" stroke-dasharray="2 1.5"/>' +
+            hpt(c.x - Math.sin(ra) * hl, c.y + Math.cos(ra) * hl, '<circle r="7" fill="#fff" stroke="#22301f" stroke-width="1.6"/><path d="M-3.2 -1.2 A3.4 3.4 0 1 1 -2.2 2.6" fill="none" stroke="#22301f" stroke-width="1.4"/><path d="M-5 -2.8 L-3.2 -0.6 L-1 -2.6" fill="none" stroke="#22301f" stroke-width="1.4"/>') + '</g>';
+        }
       }
       svg += g + '</g>';
     });
@@ -3036,7 +3042,7 @@
     var avoid = [];
     tracks.forEach(function (t) { t.segs.forEach(function (g) { for (var k = 0; k <= 4; k++) { var q = bezAt(g.b, k / 4); avoid.push({ x: q.x - 4, y: q.y - 4, w: 8, h: 8, k: 4 }); } }); });
     R.circles.forEach(function (c) { if (c.type === 'station') avoid.push({ x: c.x - c.w / 2, y: c.y - c.d / 2, w: c.w, h: c.d, k: 8 }); });
-    R.circles.forEach(function (c) { if (c.type === 'staff') avoid.push({ x: c.x - S.staffW / 2, y: c.y - S.staffD / 2, w: S.staffW, h: S.staffD, k: 8 }); if (c.type === 'rest') avoid.push({ x: c.x - REST_W / 2, y: c.y - REST_D / 2, w: REST_W, h: REST_D, k: 8 }); });
+    R.circles.forEach(function (c) { if (c.type === 'staff') avoid.push({ x: c.x - S.staffW / 2, y: c.y - S.staffD / 2, w: S.staffW, h: S.staffD, k: 8 }); if (c.type === 'rest') { var rb = bboxOf(restCorners(c.x, c.y, c.rot)); avoid.push({ x: rb.x0, y: rb.y0, w: rb.x1 - rb.x0, h: rb.y1 - rb.y0, k: 8 }); } });
     R.plazas.forEach(function (pz) { avoid.push({ x: pz.x - S.plazaW / 2, y: pz.y - S.plazaD / 2, w: S.plazaW, h: S.plazaD, k: 8 }); });
     R.ents.forEach(function (e) { avoid.push({ x: e.x, y: e.y, w: e.w, h: e.d, k: 8 }); });
     R.circles.forEach(function (c) {
@@ -3069,7 +3075,7 @@
     var gripAvoid = R.circles.filter(function (c) { return c.type !== 'part'; }).map(function (c) { return { x: c.x, y: c.y, r: c.r }; });
     if (wsel) waterPtsSvg += gripSvg('wg', wsel.id, waterPoly(wsel), gripAvoid, 'Drag to move this ' + (wsel.kind === 'river' ? 'river' : 'lake'));
     if (sc) shapeSvg += gripSvg('hg', sc.seed, outlineSamples(spts, 4).map(function (q) { return { x: sc.x + q.x, y: sc.y + q.y }; }), gripAvoid.filter(function (c) { return Math.hypot(c.x - sc.x, c.y - sc.y) > 1; }), 'Drag to move this habitat');
-    svg += shapeSvg + waterPtsSvg;
+    svg += shapeSvg + waterPtsSvg + restHandle;
     var sx = vb[0] + pad, sy = vb[1] + vb[3] - 9;
     svg += '<g id="zbar" pointer-events="none"><rect x="' + f1(sx) + '" y="' + f1(sy - 1.5) + '" width="50" height="3" fill="#22301f"/><text x="' + f1(sx + 55) + '" y="' + f1(sy) + '" font-size="7" fill="#22301f" dominant-baseline="central">50 m</text></g>';
     svg += '</svg>';
@@ -3094,6 +3100,10 @@
       html += '<div class="shape-bar"><span><b>' + (su.aquarium ? 'Aquarium ' : 'Habitat ') + su.num + '</b>: drag the white dots to change its shape. <b id="shape-area">' + fmt(su.area) + ' m²</b> <span class="muted">(minimum ' + fmt(su.base) + ' m²)</span></span>' +
         '<span class="ride-btns">' + (sc.shape ? '<button type="button" class="secondary small" data-shape-act="reset">Reset shape</button>' : '') + '<button type="button" class="secondary small" data-shape-act="done">Done</button></span></div>';
     }
+    if (restSel && R.circles.some(function (c) { return c.seed === restSel; })) {
+      html += '<div class="shape-bar"><span><b>Restaurant</b>: drag the round handle to turn it, or drag the restaurant to move it.</span>' +
+        '<span class="ride-btns"><button type="button" class="secondary small" data-rest-act="turn">Turn 90°</button><button type="button" class="secondary small danger" data-rest-act="remove">Remove</button><button type="button" class="secondary small" data-rest-act="done">Done</button></span></div>';
+    } else restSel = null;
     var legend = themeNames.map(function (t) { return '<span class="lg"><i style="background:' + colorOf[t] + '"></i>' + esc(t) + '</span>'; }).join('') +
       (R.circles.some(function (c) { return c.type === 'aquarium'; }) ? '<span class="lg"><i style="background:#9ccbe3;border-color:#2f6680"></i>Aquarium</span>' : '') +
       '<span class="lg"><i style="background:#f0b46a"></i>Plaza</span><span class="lg"><i style="background:#9b8db3"></i>Staff area</span>' +
@@ -3312,6 +3322,16 @@
       if (!drag || e.pointerId !== drag.id) return;
       var q = pt(e);
       drag.dx = q.x - drag.x0; drag.dy = q.y - drag.y0;
+      if (drag.g.getAttribute('data-drag').indexOf('rr|') === 0) {
+        var rid = drag.g.getAttribute('data-drag').slice(3), rg = svg.querySelector('[data-rest="' + rid + '"]'), rc = rg && rg.querySelector('rect');
+        if (rc) {
+          var rcx = Number(rc.getAttribute('x')) + REST_W / 2, rcy = Number(rc.getAttribute('y')) + REST_D / 2;
+          var ang = Math.atan2(-(q.x - rcx), q.y - rcy) * 180 / Math.PI;
+          rg.setAttribute('transform', 'rotate(' + ang.toFixed(1) + ' ' + rcx.toFixed(1) + ' ' + rcy.toFixed(1) + ')');
+        }
+        drag.g.setAttribute('transform', 'translate(' + drag.dx.toFixed(1) + ' ' + drag.dy.toFixed(1) + ')');
+        return;
+      }
       if (drag.group) {
         var tr = 'translate(' + drag.dx.toFixed(1) + ' ' + drag.dy.toFixed(1) + ')';
         drag.group.forEach(function (gg) { gg.setAttribute('transform', tr); });
@@ -3363,7 +3383,7 @@
         var at = pt(e);
         if (tp.trk) { var tk = tp.trk.split('|'); tapTrack(tk[0], Number(tk[1]), at); }
         else if (editRide) tapOpenMap(at);
-        else if (shapeSel || waterSel) { shapeSel = null; waterSel = null; multiSel = []; render(); }
+        else if (shapeSel || waterSel || restSel) { shapeSel = null; waterSel = null; restSel = null; multiSel = []; render(); }
         else if (multiSel.length) { multiSel = []; showSelection(svg); }
         return;
       }
@@ -3396,6 +3416,15 @@
     });
   }
   function moveItem(parts, dx, dy) {
+    if (parts[0] === 'rr') {
+      var rq = findRest(plan(), parts[1]);
+      if (!rq) return;
+      var a0 = (rq.rot || 0) * Math.PI / 180, hl = REST_D / 2 + 9;
+      var hx = rq.x - Math.sin(a0) * hl + dx, hy = rq.y + Math.cos(a0) * hl + dy;
+      rq.rot = Math.round(Math.atan2(-(hx - rq.x), hy - rq.y) * 180 / Math.PI * 10) / 10;
+      changed();
+      return;
+    }
     if (parts[0] === 's') { stretchPoint(parts[1], Number(parts[2]), dx, dy); return; }
     if (parts[0] === 'w' || parts[0] === 'wg') { moveWater(parts[1], dx, dy); return; }
     if (parts[0] === 'hg') parts = ['c', parts[1]];
@@ -3468,7 +3497,7 @@
     if (!LR) return;
     var gap = S.P + 4, items = [], bumped = [];
     LR.R.circles.forEach(function (c) {
-      if (c.type === 'part') return;
+      if (c.type === 'part' || c.type === 'rest') return; // restaurants may overlap: they never push or get pushed
       var fs = c.type === 'station' && findStation(plan(), c.seed);
       if (fs && (IN_HAB_OK[fs.ride.type] || onWaterAt(LR, fs.st.x, fs.st.y))) return; // allowed where it is: never bumped
       var ref = fs ? fs.st : c.type === 'staff' ? Lm.staff.filter(function (q) { return q.id === c.seed; })[0] : c.type === 'rest' ? (Lm.rests || []).filter(function (q) { return q.id === c.seed; })[0] : Lm.pos[c.seed];
@@ -3501,7 +3530,7 @@
     }
   }
   function tapItem(parts, at) {
-    if (parts[0] === 'wg' || parts[0] === 'hg') return; // grips only move things
+    if (parts[0] === 'wg' || parts[0] === 'hg' || parts[0] === 'rr') return; // grips only move things
     var kind = parts[0], id = parts[1], LR = layoutCache.result;
     var isStaff = kind === 'c' && LR && LR.R.circles.some(function (c) { return c.seed === id && c.type === 'staff'; });
     var stn = kind === 'c' && findStation(plan(), id);
@@ -3516,7 +3545,7 @@
     // while redrawing a gap in a ride's track, taps on habitats place track (gondolas and monorails pass overhead)
     var er = editRide && findRide(plan(), editRide);
     if (hab && er && er.track && er.track.some(function (q) { return q.g; }) && at) { tapOpenMap(at); return; }
-    if (hab) { shapeSel = shapeSel === id ? null : id; waterSel = null; editRide = null; delMode = false; render(); return; }
+    if (hab) { shapeSel = shapeSel === id ? null : id; waterSel = null; restSel = null; editRide = null; delMode = false; render(); return; }
     if (stn) {
       if (!window.confirm('Remove this ' + stn.ride.name + ' station?')) return;
       stn.ride.stations = stn.ride.stations.filter(function (q) { return q.id !== id; });
@@ -3533,10 +3562,7 @@
       Lm0.plazas = Lm0.plazas.filter(function (q) { return q.id !== id; });
       changed();
     } else if (kind === 'c' && LR && LR.R.circles.some(function (c) { return c.seed === id && c.type === 'rest'; })) {
-      if (!window.confirm('Remove this restaurant?')) return;
-      var Lr = toManual(plan());
-      Lr.rests = (Lr.rests || []).filter(function (q) { return q.id !== id; });
-      changed();
+      restSel = restSel === id ? null : id; shapeSel = null; waterSel = null; editRide = null; delMode = false; render();
     } else if (isStaff) {
       if (!window.confirm('Remove this staff area?')) return;
       var Lm = toManual(plan());
@@ -3545,6 +3571,25 @@
     }
   }
   var REST_W = 25, REST_D = 40; // restaurant footprint (m)
+  var restSel = null; // the restaurant being turned
+  function restCorners(x, y, rot) {
+    var a = (rot || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+    return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(function (q) {
+      var dx = q[0] * REST_W / 2, dy = q[1] * REST_D / 2;
+      return { x: x + dx * ca - dy * sa, y: y + dx * sa + dy * ca };
+    });
+  }
+  function findRest(p, id) { return ((p.layout && p.layout.rests) || []).filter(function (q) { return q.id === id; })[0]; }
+  function restAction(act) {
+    var q = findRest(plan(), restSel);
+    if (act === 'done' || !q) { restSel = null; render(); return; }
+    if (act === 'turn') { q.rot = ((q.rot || 0) + 90) % 360; changed(); return; }
+    if (act === 'remove') {
+      if (!window.confirm('Remove this restaurant?')) return;
+      plan().layout.rests = plan().layout.rests.filter(function (z) { return z.id !== restSel; });
+      restSel = null; changed();
+    }
+  }
   function addToMap(kind) {
     var Lm = toManual(plan()), LR = layoutCache.result, S = L();
     var obstacles = LR && LR.R ? LR.R.circles.map(function (c) { return { x: c.x, y: c.y, r: c.r }; }) : [];
@@ -3790,6 +3835,8 @@
       if (wbt) return waterAction(wbt.getAttribute('data-water-act'));
       var sb = e.target.closest('button[data-shape-act]');
       if (sb) return shapeAction(sb.getAttribute('data-shape-act'));
+      var rb = e.target.closest('button[data-rest-act]');
+      if (rb) return restAction(rb.getAttribute('data-rest-act'));
       if (!e.target.closest('#regen')) return;
       var lost = lostOnRedraw(plan());
       if (lost && !window.confirm('Regenerating the plan will clear ' + lost + '. Regenerate anyway?')) return;

@@ -730,7 +730,7 @@ if (typeof document !== 'undefined') (function () {
         if (c.kind === 'group') {
           s5.push(line(label(c.name), c.met ? '<span class="ok">✓ Met</span>' : '<span class="nomatch">✗ Not met</span>', '',
             esc(c.who) + (c.met ? ' · with ' + esc(c.with.join(', ')) :
-              ' · needs at least one of: ' + esc(c.options.slice(0, 10).join(', ')) + (c.options.length > 10 ? ' and ' + (c.options.length - 10) + ' more' : ''))));
+              ' · needs at least one of: ' + esc(c.options.join(', ')))));
         } else {
           s5.push(line('Lives with ' + esc(c.name), c.met ? '<span class="ok">✓ Met</span>' : '<span class="nomatch">✗ Not met</span>', '', esc(c.who)));
         }
